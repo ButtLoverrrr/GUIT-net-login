@@ -33,6 +33,15 @@ python -m venv .venv
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build.ps1 -Target all
 ```
 
+## 自动发布
+
+推送代码到 `main`（`src/`、`scripts/`、`requirements.txt` 有变动时）会自动触发 [发布工作流](.github/workflows/release.yml)：
+
+1. 读取仓库现有 `v*` 标签，**补丁版本号自动 +1**（也可在 Actions 页面手动触发，选择 patch / minor / major）
+2. 把新版本号写入 `src/version.py`，界面标题与底部会显示当次版本
+3. 在云端构建 `lite` 与 `full` 两个 exe
+4. 打标签并创建 Release，附带两个 exe 与自动生成的发布说明（无需本地手工打包上传）
+
 ## 开源协议
 
 本项目采用 [MIT 协议](LICENSE)，可自由使用、修改与分发。

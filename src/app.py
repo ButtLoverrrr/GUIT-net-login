@@ -32,6 +32,7 @@ from portal_client import (
     PortalError,
     auto_login,
 )
+from version import __version__
 
 APP_TITLE = "联网设置"
 DPI_AWARE = True
@@ -101,7 +102,7 @@ class LoginApp:
 
     # ------------------------------------------------------------------ 界面
     def _build_ui(self) -> None:
-        self.root.title(APP_TITLE)
+        self.root.title("%s v%s" % (APP_TITLE, __version__))
         self.root.resizable(False, False)
         font_label = ("Microsoft YaHei UI", 9)
         font_entry = ("Microsoft YaHei UI", 10)
@@ -234,6 +235,8 @@ class LoginApp:
         )
         repo_link.pack(side="left")
         repo_link.bind("<Button-1>", lambda _e: self._open_url(PROJECT_URL, "项目主页"))
+        tk.Label(repo_row, text=" v%s" % __version__, font=("Microsoft YaHei UI", 7),
+                 fg="#8a99aa").pack(side="left")
 
         # 免责声明
         tk.Label(

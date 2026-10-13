@@ -8,6 +8,27 @@
 | 2026-10-13 12:16 | 编写 `docs\PLAN.md`（需求澄清 6 项、现状核对 6 条事实、选型 9 候选评估、步骤 9 步、风险 5 项、静态验收 5 条） | `docs\PLAN.md` | 待用户确认方案 | 无（文件为纯新增） |
 | 2026-10-13 12:17 | 编写 `README.md`（占位，待实现后补运行方式） | `README.md` | 未验证 | 无（文件为纯新增） |
 
+## 2026-10-13 14:15 自动发布：版本号自动迭代（GitHub Actions）
+
+**改动**（用户要求：「推送更新自动迭代版本号」）
+
+1. 新增 `.github/workflows/release.yml`：把「构建 + 打标签 + 发 Release + 上传附件」搬到云端自动化。
+   - **触发**：`src/`、`scripts/`、`requirements.txt`、本工作流自身推送到 `main` 时自动运行；也可在 Actions 页面手动触发并选择 `patch` / `minor` / `major`。
+   - **版本号迭代**：读取仓库现有 `v*` 标签取最大值，按递增类型生成新版本号（默认补丁位 +1），无需手改任何文件。
+   - **流程**：写入版本号到 `src/version.py` → 建 venv 装依赖 → `build.ps1 -Target all` → 用 `gh release create` 打标签并发布，附件为两个 exe，发布说明自动包含最近提交列表。
+   - 使用 Actions 内置 `GITHUB_TOKEN`（`contents: write`），**不再需要个人 Token**。
+2. 新增 `src/version.py`：版本号单一来源；`src/app.py` 引入并在**窗口标题**（`联网设置 vX.Y.Z`）与**底部项目地址行**显示。
+3. `README.md`：新增「自动发布」一节。
+
+**验证**
+
+| 检查 | 方式 | 结果 |
+| --- | --- | --- |
+| 工作流 YAML 语法 | `yaml.safe_load()` 解析 | 通过；触发方式 `push` + `workflow_dispatch`，8 个步骤齐全 |
+| Python 语法 | `py_compile src\*.py` | 通过（含新增 version.py） |
+| 版本号接入 | `grep __version__ src\app.py` | 标题与底部两处均已使用 |
+| 端到端 | 推送触发 Actions | 见下方运行记录 |
+
 ## 2026-10-13 14:00 去除文件残留：不写日志、配置单文件化
 
 **改动**（用户要求：「不要在本地产生 log」「不要在其他用户电脑上产生额外文件」）
