@@ -17,11 +17,42 @@ import io
 import json
 import os
 import queue
+import socket
 import sys
 import threading
 import time
-import tkinter as tk
 import webbrowser
+
+# ---------------------------------------------------------------- 单实例判定
+# 必须在加载 tkinter / Pillow / pystray 之前完成：一旦这些库加载过，退出进程时
+# 解释器收尾会被线程/socket 清理拖住（实测滞留成 Not Responding 的僵尸进程）。
+SINGLE_INSTANCE_PORT = 47823
+_IS_SECONDARY = False       # 本进程是否为「第二个实例」
+_INSTANCE_SERVER = None     # 唯一实例持有的监听套接字
+try:
+    _srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        _srv.bind(("127.0.0.1", SINGLE_INSTANCE_PORT))
+        _srv.listen(1)
+        _INSTANCE_SERVER = _srv
+    except OSError:
+        try:
+            _srv.close()
+        except Exception:
+            pass
+        # 端口被占：连接并握手，收到 ok 才确认是同一个程序的已有实例
+        _cli = socket.create_connection(("127.0.0.1", SINGLE_INSTANCE_PORT), timeout=2)
+        _cli.sendall(b"show\n")
+        if _cli.recv(16).strip() == b"ok":
+            _IS_SECONDARY = True
+        _cli.close()
+except Exception:
+    pass  # 任何异常都不影响正常启动
+
+if _IS_SECONDARY:
+    os._exit(0)  # 已有实例：立即退出（此时尚未加载任何 GUI 库，退出无阻塞）
+
+import tkinter as tk  # noqa: E402  有意置于单实例判定之后
 
 # Pillow：解码验证码图片（比 tkinter 原生解码宽容），并生成托盘图标
 try:
@@ -76,6 +107,8 @@ def resource_path(name: str) -> str:
 APP_TITLE = "联网设置"
 DPI_AWARE = True
 WM_CLOSE = 0x0010
+# 单实例锁：本地回环端口（纯标准库实现，避免 Win32 句柄在打包环境下的兼容问题）
+SINGLE_INSTANCE_PORT = 47823
 # 验证码显示放大倍数：实测门户原图仅 80x24 像素，放大 4 倍约 320x96，肉眼可辨
 CAPTCHA_ZOOM = 4
 # 项目主页（界面上显示并可点击打开）
@@ -142,6 +175,8 @@ class LoginApp:
 
     # ------------------------------------------------------------------ 界面
     def _build_ui(self) -> None:
+        global _MAIN_WINDOW
+        _MAIN_WINDOW = self.root  # 供单实例通知唤出窗口
         self.root.title("%s v%s" % (APP_TITLE, APP_VERSION))
         ico = resource_path("app.ico")
         if os.path.exists(ico):
@@ -422,7 +457,7 @@ class LoginApp:
             self._set_status(message or "登录成功")
             self._append_log("✔ %s" % (message or "登录成功"))
             self._refresh_status()
-            self.root.after(1200, self._on_hide)
+            # 不再自动隐藏：连接成功后窗口保持原样，由用户自行点「隐藏」
         elif message:
             self._set_status(message)
             self._append_log("✘ %s" % message)
@@ -761,11 +796,35 @@ class LoginApp:
             self._post("busy", False)
 
 
+_MAIN_WINDOW = None  # 主窗口引用：供实例间通知唤出窗口
+
+
+def _instance_listener(server) -> None:
+    """后台监听：收到 show 指令就把主窗口唤出。"""
+    while True:
+        try:
+            conn, _ = server.accept()
+            data = conn.recv(16)
+            if b"show" in data:
+                conn.sendall(b"ok")
+            conn.close()
+            if b"show" in data and _MAIN_WINDOW is not None:
+                _MAIN_WINDOW.after(0, _MAIN_WINDOW.deiconify)
+        except Exception:
+            return
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="校园网快速登录")
     parser.add_argument("--silent", action="store_true", help="静默登录（无窗口）")
     parser.add_argument("--console", action="store_true", help="保留控制台输出（开发用）")
     args = parser.parse_args()
+
+    # 本进程即唯一实例：启动实例间监听，收到 show 指令就把主窗口唤出
+    if _INSTANCE_SERVER is not None:
+        threading.Thread(
+            target=_instance_listener, args=(_INSTANCE_SERVER,), daemon=True
+        ).start()
 
     if DPI_AWARE:
         try:

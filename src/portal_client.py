@@ -191,16 +191,27 @@ class PortalClient:
         return LoginResult(True, "登录成功", KIND_OK)
 
     @staticmethod
+    @staticmethod
     def _extract_error(html: str) -> str:
+        """提取门户返回的校验错误文本。
+
+        ASP.NET 的错误提示有两种常见形态：`<li>错误</li>` 列表，
+        或 `<p class="validation-summary-errors">错误</p>` 纯文本块。
+        后者块内没有尖括号，必须先去标签再取文本，否则会漏掉错误内容
+        （曾导致「验证码错误」等提示无法识别，登录/注销都只能报「未确认」）。
+        """
         msgs = re.findall(r"<li>([^<]{2,80})</li>", html)
         if not msgs:
             block = re.search(
-                r"validation-summary-errors[^>]*>(.*?)</(?:div|ul|p)",
+                r"validation-summary-errors[^>]*>(.*?)</(?:div|ul|p|span)",
                 html,
                 re.S,
             )
             if block:
-                msgs = re.findall(r">([^<>]{2,80})<", block.group(1))
+                text = re.sub(r"<[^>]+>", " ", block.group(1))
+                text = re.sub(r"\s+", " ", text).strip()
+                if text:
+                    msgs = [text]
         cleaned = [m.strip() for m in msgs if m.strip()]
         return "；".join(cleaned)
 
