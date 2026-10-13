@@ -21,12 +21,14 @@ $ErrorActionPreference = 'Stop'
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $EntryPoint  = Join-Path $ProjectRoot 'src\app.py'
-$PyInstaller = Join-Path $ProjectRoot '.venv\Scripts\pyinstaller.exe'
+# 用 python -m PyInstaller 而非 pyinstaller.exe：venv 的 .exe 启动器内含绝对路径，
+# 项目目录改名或移动后会失效，模块方式不受影响。
+$Python      = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
 $DistDir     = Join-Path $ProjectRoot 'build'
 $SampleCfg   = Join-Path $ProjectRoot 'config\config.sample.json'
 
-if (-not (Test-Path $PyInstaller)) {
-    throw "未找到 $PyInstaller；请先创建 .venv 并安装 requirements.txt"
+if (-not (Test-Path $Python)) {
+    throw "未找到 $Python；请先创建 .venv 并安装 requirements.txt"
 }
 
 function Build-One {
@@ -68,7 +70,7 @@ function Build-One {
     # 因此调用原生命令期间临时放宽该设置，改以退出码判定成败。
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    & $PyInstaller @pyiArgs
+    & $Python -m PyInstaller @pyiArgs
     $exitCode = $LASTEXITCODE
     $ErrorActionPreference = $previousEap
 
