@@ -697,12 +697,17 @@ class LoginApp:
 
     # ------------------------------------------------------- 状态与断开网络
     def _refresh_status(self) -> None:
-        """后台查询门户连接状态（IP + 是否在线）并更新状态栏。"""
+        """后台查询连接状态并更新状态栏。
+
+        在线与否以外网探测为准：门户的状态 span 是「会话视角」，用户网络
+        若由浏览器等其他方式连接，门户对程序会话会显示「未联网」，不可信。
+        """
         def worker():
             try:
                 self._ensure_session()
                 status = self.session.query_status()
-                self._post("net", status.online, status.ip)
+                online = self.session.is_online()
+                self._post("net", online, status.ip)
             except Exception:
                 pass
 
@@ -741,7 +746,10 @@ class LoginApp:
             self.captcha_purpose = "logoff"
             self._post("net", status.online, status.ip)
             self._post("captcha", png, "")
-            if not status.online:
+            # 注意：门户状态 span 是「会话视角」——若用户网络是浏览器等其他
+            # 方式连接的，门户对程序会话会显示「未联网」，与真实网络无关。
+            # 因此这里用外网探测判断，而不是 status.online。
+            if not self.session.is_online():
                 self._post("info", "当前未联网，无需断开")
                 self._post("done", True, "当前未联网")
                 return
