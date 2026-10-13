@@ -89,7 +89,19 @@ jobs:
 
       - name: 构建 lite 与 full
         shell: pwsh
-        run: ./scripts/build.ps1 -Target all
+        run: |
+          & ./scripts/build.ps1 -Target all 2>&1 | Tee-Object -FilePath build-log.txt
+          if (-not $?) { exit 1 }
+
+      - name: 构建失败时输出日志尾部（诊断用）
+        if: failure()
+        shell: pwsh
+        run: |
+          if (Test-Path build-log.txt) {
+            Get-Content build-log.txt -Tail 60 | ForEach-Object { "::error::$_" }
+          } else {
+            "::error::未找到 build-log.txt"
+          }
 
       - name: 生成发布说明
         shell: pwsh
@@ -105,7 +117,7 @@ jobs:
             "",
             "| 文件 | 体积 | 说明 |",
             "| --- | --- | --- |",
-            "| ``GUIT-net-login-full.exe`` | 约 160 MB | **推荐**，验证码自动识别，基本零输入 |",
+            "| ``GUIT-net-login-full.exe`` | 约 82 MB | **推荐**，验证码自动识别，基本零输入 |",
             "| ``GUIT-net-login-lite.exe`` | 约 19 MB | 体积小，手动输入 4 位验证码 |",
             "",
             "两个都是单文件，双击即用，不需要安装 Python。",
