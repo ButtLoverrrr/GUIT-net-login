@@ -10,6 +10,7 @@
 
 import http.cookiejar
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -256,8 +257,34 @@ class PortalClient:
             raise PortalError("验证码获取失败（未返回 PNG）")
         return captcha, status
 
+    def _confirm_offline(self, ok_message: str, fallback: str = "") -> LoginResult:
+        """用外网探测确认是否真的断开。
+
+        门户确认注销很快，但**网络生效有延迟**（实测提交后 2 秒仍可上网），
+        状态 span 的刷新同样滞后，因此最多探测 3 次、每次间隔 4 秒。
+        """
+        for _ in range(3):
+            time.sleep(4)
+            try:
+                if not self.is_online():
+                    return LoginResult(True, ok_message, KIND_OK)
+            except Exception:
+                pass
+        if fallback:
+            return LoginResult(False, fallback, KIND_UNKNOWN)
+        # 门户已明确确认成功，只是生效较慢：按成功处理并说明
+        return LoginResult(True, ok_message + "（生效略有延迟）", KIND_OK)
+
     def submit_logoff(self, captcha: str) -> LoginResult:
-        """提交注销（断开网络）。"""
+        """提交注销（断开网络）。
+
+        判定顺序（依据实测的门户行为）：
+        1. 门户把「注销成功!」「验证码错误!」都放在 validation-summary 块里，
+           先看提取到的提示文字——含「成功」即成功，含「验证码」即验证码错误；
+           （曾把「注销成功!」当失败信息返回，是断开功能误报的原因）
+        2. 否则按响应页的状态 span 判定；
+        3. 都不明确时用外网探测做最终判定（生效有延迟，见 _confirm_offline）。
+        """
         names = self.cfg.get("logoffFields") or {}
         fields = dict(self.defaults)
         fields.update(self.hidden)
@@ -268,21 +295,23 @@ class PortalClient:
         payload = urllib.parse.urlencode(fields).encode("utf-8")
         html = self._request(self.logoff_url(), data=payload).decode("utf-8", "ignore")
 
-        status = self._parse_status(html)
-        if status.text != "未知" and not status.online:
-            return LoginResult(True, "已断开网络", KIND_OK)
         text = self._extract_error(html)
         if "验证码" in text:
             return LoginResult(False, text or "验证码错误", KIND_CAPTCHA)
+        if "成功" in text:
+            # 门户已确认注销，网络生效可能有延迟，用外网探测复核
+            return self._confirm_offline("已断开网络")
+
+        status = self._parse_status(html)
+        if status.text != "未知" and not status.online:
+            return LoginResult(True, "已断开网络", KIND_OK)
         if text:
             return LoginResult(False, text, KIND_UNKNOWN)
-        # 门户未明确反馈时复查一次状态
-        try:
-            if not self.query_status().online:
-                return LoginResult(True, "已断开网络", KIND_OK)
-        except PortalError:
-            pass
-        return LoginResult(False, "断开失败：门户未确认状态变化", KIND_UNKNOWN)
+        # 门户未给出任何明确反馈：外网探测做最终判定
+        return self._confirm_offline(
+            "已断开网络（联网探测确认）",
+            fallback="断开失败：门户未确认状态变化",
+        )
 
 
 class LoginSession:
