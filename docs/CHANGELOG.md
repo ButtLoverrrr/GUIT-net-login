@@ -8,6 +8,32 @@
 | 2026-10-13 12:16 | 编写 `docs\PLAN.md`（需求澄清 6 项、现状核对 6 条事实、选型 9 候选评估、步骤 9 步、风险 5 项、静态验收 5 条） | `docs\PLAN.md` | 待用户确认方案 | 无（文件为纯新增） |
 | 2026-10-13 12:17 | 编写 `README.md`（占位，待实现后补运行方式） | `README.md` | 未验证 | 无（文件为纯新增） |
 
+## 2026-10-13 14:45 修复：打包后 ModuleNotFoundError（分发前实测发现）
+
+**问题**（在回答「可以分发了吗」前对 Release 产物做实测时发现）
+
+- 现象：运行 Release 里的 exe 报 `ModuleNotFoundError: No module named 'version'`，窗口打不开。
+- 根因：`src/version.py` 作为独立模块，PyInstaller `--onefile` 打包时未被收集；`build.ps1` 追加 `--paths src` 后**仍未解决**。
+- 影响范围：**v1.0.1、v1.0.2 的 Release 产物不可用**（v1.0.0 无此问题，因为当时尚未引入版本号模块）。
+
+**修复**
+
+1. 删除 `src/version.py`，版本号改为 `app.py` 内常量 `APP_VERSION`（注释标明由工作流替换），彻底消除对独立模块收集的依赖。
+2. 发布工作流改为**正则替换 `app.py` 中的 `APP_VERSION` 行**，并用 `[System.IO.File]::WriteAllText` 以无 BOM UTF-8 写回。
+3. `build.ps1` 保留 `--paths src`（对将来的其它模块仍有意义）。
+4. 发布 v1.0.3 后**重新下载云端产物实测**：窗口标题为「联网设置 v1.0.3」，GUI 正常，运行后程序目录无任何残留。
+
+**验证方法改进（重要经验）**
+
+- 此前用「运行 exe 看 stderr 有无 Traceback」判断成败是**假阳性**——`--noconsole` 模式下崩溃信息不会输出到 stderr，本地那次"验证通过"实为误判。
+- 改用 `tasklist /v` 读取**窗口标题**判断（标题存在 = GUI 真正创建），才是可靠判据。
+
+**过程记录（网络限制应对）**
+
+| 环节 | 情况 | 处置 |
+| --- | --- | --- |
+| `git push` | 本机 GitHub HTTPS 通道 TLS 握手失败（schannel / OpenSSL 后端均失败，带代理亦不通） | 改用 **GitHub REST API** 推送：单文件用 Contents API、多文件用 Git Data API（blob→tree→commit→更新 ref），同样能触发工作流 |
+
 ## 2026-10-13 14:20 自动发布首次跑通（v1.0.1）
 
 **改动**
