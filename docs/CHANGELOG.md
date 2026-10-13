@@ -8,6 +8,184 @@
 | 2026-10-13 12:16 | 编写 `docs\PLAN.md`（需求澄清 6 项、现状核对 6 条事实、选型 9 候选评估、步骤 9 步、风险 5 项、静态验收 5 条） | `docs\PLAN.md` | 待用户确认方案 | 无（文件为纯新增） |
 | 2026-10-13 12:17 | 编写 `README.md`（占位，待实现后补运行方式） | `README.md` | 未验证 | 无（文件为纯新增） |
 
+## 2026-10-13 19:25 收紧成功判定：禁用「外网可达」确认登录成功 + 登录/注销表单来源互斥守卫
+
+**问题**（代码评审提出，逐条核实成立）
+
+1. `submit()` 在门户结果不明确（`KIND_UNKNOWN`）时调用 `is_online()` 确认成功 ——
+   但本项目已实测：**未认证时外网探测照样可达**（放行白名单），据此确认会把失败报成成功。
+2. `_judge()` 在响应**不含登录控件**时直接判成功 —— 门户改版、维护页、错误页都长这样。
+3. 成功文案里含泛化的「成功」——异常文案也可能命中。
+4. `submit()` **缺少表单来源守卫**：注销成功后 `client.hidden` 仍来自注销页，
+   而 GUI 只检查「hidden 非空」（`app.py` 手输分支），下一次连接可能拿注销页的
+   ViewState 提交登录 —— 与 `submit_logoff` 已有的守卫不对称。
+
+**修复**
+
+| # | 位置 | 改动 |
+| --- | --- | --- |
+| 1 | `portal_client.py` `submit()` | `KIND_UNKNOWN` 时改为 `refresh_portal_status()` 复核：**门户状态显示在线才算成功**；彻底删除 `is_online()` 作为成功依据；无法确认时返回「登录结果无法确认」（不再报成功） |
+| 2 | `portal_client.py` `_judge()` | 不含登录控件 → 返回 `KIND_UNKNOWN`（交由 `submit()` 用门户状态复核），不再直接判成功 |
+| 3 | `portal_client.py` 常量 | 分组收窄：`LOGIN_SUCCESS_WORDS = ("联网成功", "登录成功")`、`LOGOFF_SUCCESS_WORDS = ("断开成功", "注销成功")`，删除泛化「成功」 |
+| 4 | `portal_client.py` | `submit()` 开头加来源守卫（`form_source != "login"` → 重新 `open_session()`，与 `submit_logoff` 对称）；新增 `invalidate_form()`，`submit_logoff()` 成功后清空 `hidden`/`defaults`/`form_source` |
+| 4b | `app.py` | `_on_connect` 的手输判定加「表单必须来自登录页」条件；`_worker` 的手输分支由「hidden 非空」改为 `form_source == "login"` |
+
+**验证**（桩测试 13/13 通过，全程不接触真实门户）
+
+| 检查 | 结果 |
+| --- | --- |
+| `_judge` 成功文案 `联网成功!` | ok=True |
+| `_judge` 验证码错误 / 账号密码错误 | `captcha` / `credential` |
+| `_judge` 异常页（无登录控件） | `(False, unknown)` —— 不再直接成功 |
+| `_judge` 泛化「操作成功完成」 | `(False, unknown)` —— 不再算成功 |
+| **submit**：门户未联网 + 外网可达=True | **ok=False**（旧实现会报成功） |
+| **submit**：门户显示已联网 | ok=True（消息：登录成功（门户状态显示已联网）） |
+| **来源守卫**：表单来自注销页时提交登录 | 先 `GET /login` 重新取页面，再 `POST /login`，`form_source` 复位为 `login` |
+| **注销后清理** | `form_source=''`、`hidden={}` |
+| 真实回归（真凭据登录） | `ok=True message=联网成功!`（成功文案直命中） |
+| 真实回归（注销链路错码） | `ok=False kind=captcha 验证码错误!` |
+| 真实回归（门户已联网时 `auto_login`） | `门户显示已联网，无需登录` |
+
+**影响文件**：`src\portal_client.py`、`src\app.py`
+
+**回滚点**：`temp\output\backup-20261013\`
+
+## 2026-10-13 19:10 断开网络改为自动识别验证码；开机自启改为「打开软件 + 自动连接」
+
+**需求**（用户反馈：连接与断开都已成功，剩下两点体验问题）
+
+1. 「断开网络」还要手动输验证码 → 希望像连接一样自动识别；
+2. 「开机自动登录」要**开机自动打开软件、自动连接**。
+
+**改动**
+
+1. `src\app.py` `_logoff_worker` 重写为两条路径：
+   - 手输优先：界面上的注销码仍有效且用户填了值 → 直接提交；
+   - **自动**：取注销页 + 取码 → OCR → 提交；验证码错就换码重试（上限 `maxCaptchaRetry`），
+     连续失败或 OCR 不可用（lite 构建）才提示手输。
+   判定是否已断开一律以**门户状态**为准（注销页 span 对本机 IP 判定准确）。
+2. 新增 `--autostart`：正常打开界面，并在网络就绪后自动连接
+   （`_auto_connect_step`：最多 3 次、间隔 12 秒；成功判据 = 门户状态，而不是外网可达）。
+   开机瞬间网卡/DHCP 常未就绪，故做重试。
+3. `src\autostart.py`：
+   - 自启参数由 `--silent`（只登录、不显示界面）改为 `--autostart`；
+   - 新增 `read_lnk()` 与 `ensure_current()`：程序启动时自动把自启项校正为指向
+     **当前正在运行的这个程序**——自愈历史上指向 `pythonw.exe src\app.py` 的旧快捷方式
+     （源码模式配置目录没有 config.json，开机只会弹一个空窗口）。
+
+**验证**（全部用桩：未做真实注销、未真实提交登录、未改动真实自启项）
+
+| 检查 | 结果 |
+| --- | --- |
+| 点一次「断开网络」（`submit_logoff` 用桩） | `验证码识别为 gyec，正在断开…` → `✔ 已断开网络（门户已确认下线·桩）`；提交 1 次，**无需手输** |
+| `--autostart` 启动（`query_status` 桩=未联网、`submit` 用桩） | `开机自动登录：正在连接（第 1/3 次）` → `✔ 联网成功!（桩）`；门户仍显示未联网时按 12 秒间隔继续重试 |
+| 单 root 单独进程复测 | 验证码图片正常显示，无「验证码显示失败」 |
+| 三个模块语法 | `py_compile src\app.py src\portal_client.py src\autostart.py` 通过 |
+
+**影响文件**：`src\app.py`、`src\autostart.py`
+
+**回滚点**：`temp\output\backup-20261013\`（`app.py`、`portal_client.py`、`autostart.py`、`config.json`、`CHANGELOG.md`、旧 exe）
+
+## 2026-10-13 19:40 登录前判断改以门户状态为准（修复「点连接一直连不上」的真正原因）
+
+**问题**（用户实测：软件里点「连接」始终连不上，只能去网页门户登录）
+
+实测发现：**门户显示「未联网」时，本机外网探测依旧全都可达**
+（`http://www.msftconnecttest.com/...` 200、`http://www.gstatic.com/generate_204` 204、
+`http://www.baidu.com` 200）——这些目标显然是未认证状态下的放行白名单。
+
+旧逻辑用「外网是否可达」判断是否需要登录，于是软件直接回
+**「网络已连通，无需登录」并结束——根本没有提交登录**，门户侧始终未认证。
+证据（实测）：
+
+| 场景 | 结果 |
+| --- | --- |
+| 门户 `未联网` + 外网可达 True → `auto_login()` | 返回 `网络已连通，无需登录`，门户状态**保持未联网** |
+| 同上 → 打包版 `GUIT-net-login-full.exe --silent` | 退出码 **0**（自称成功），门户**仍未联网** |
+| 同上 → 直接调用 `POST /login` | 返回 `联网成功!`，门户转为**已联网** |
+
+**修复**
+
+新增 `LoginSession.needs_login()`：**以门户状态为准**（`GET /logoff` 的
+`MainContent_LabelOnline`），门户状态未知时才退回外网探测。并让三处调用点全部改用它：
+
+1. `portal_client.auto_login()`（`--silent` 走这条）；
+2. `app.py` `_worker()`（GUI 点「连接」）；
+3. `app.py` `_prefetch_worker()`（启动预取的提示文案）。
+
+**验证**
+
+| 检查 | 结果 |
+| --- | --- |
+| 实况（门户已联网） | `needs_login=False`（正确跳过登录） |
+| 桩：门户 `未联网` | `needs_login=True`（未认证时必须去登录） |
+| 桩：门户 `已联网` | `needs_login=False` |
+| 桩：门户状态未知 | `needs_login=False`（退回外网探测，外网可达） |
+| **关键回归**：门户 `未联网` 桩下跑 `auto_login()` | **真的提交登录** → `ok=True message=联网成功!`（不再短路） |
+| 语法 | `py_compile src\portal_client.py src\app.py` 通过 |
+
+**影响文件**：`src\portal_client.py`、`src\app.py`
+
+**说明**：本次验证全程只读门户状态 + 桩函数模拟，**没有再做真实注销**（用户明确要求停止）。
+
+## 2026-10-13 19:05 接口失败根因修复（连接误报失败、断开误报失败、在线状态误判）
+
+**问题**（用户实测：点「连接」一直失败、点「断开网络」一直失败）
+
+用真实凭据对门户逐接口实测后定位到 5 个判定缺陷（完整证据见 `docs\DIAGNOSIS-20261013.md`）：
+
+1. **登录成功被判失败**：本门户登录成功后**仍然渲染登录页样式**（含验证码框与登录按钮），
+   只在 `validation-summary` 里写 `联网成功!`。旧 `_judge()` 只判「是否仍是登录页」，
+   把真实成功降级为 `KIND_UNKNOWN`，只能靠外网探测兜底；兜底一慢就弹
+   `登录失败：联网成功!`。
+2. **注销前 ViewState 被覆盖**：`prepare()`（启动预取 / 点「换一张」）会把 `hidden`
+   换成登录页的 ViewState；此时点「断开网络」拿它去 POST `/logoff`，门户只回
+   **2530 字节无提示空壳页**，程序报 `断开失败：门户未确认状态变化`。
+3. **验证码取新即作废**：同会话取新码会让上一张立即失效（实测），界面预取的码
+   可能在点击时已过期 → 必然回 `验证码错误!`。
+4. **在线探测单源脆弱**：`https://www.msftconnecttest.com/...` 与
+   `https://connectivitycheck.gstatic.com/...` 在本网络 **TLS 被阻断**（curl 000），
+   单源探测把「已联网」判成离线。
+5. **断开判据用错**：旧逻辑用「外网是否可达」判断开。实测本机注销后门户状态已变
+   「未联网」，但外网依旧可达（出口另有旁路通道），于是永远判不出断开、报
+   「生效略有延迟」；状态栏同样显示错误的在线状态。
+
+**修复**（`src\portal_client.py`、`src\app.py`）
+
+1. `_judge()` 先认门户成功文案（`SUCCESS_WORDS`，实测登录成功 = `联网成功!`），再判页面。
+2. 隐藏字段带来源标记 `form_source`（`login` / `logoff`）；`submit_logoff()` 发现来源
+   不是 `logoff` 时先刷新注销页并返回 `KIND_CAPTCHA`，界面提示重新输码。
+3. 新增 `captcha_epoch`（每取一次码 +1）；界面记录当前展示的码属于哪个 epoch，
+   提交前若已过期则放弃手输值、自动重新取码 + OCR（`app.py` `_on_connect` / `_logoff_worker`）。
+4. `is_online()` 改为**多源降级**（HTTP connecttest → gstatic 204 → baidu），任一命中即在线；
+   配置里 `onlineProbe.url` 仍作首选。
+5. 新增 `refresh_portal_status()`：注销后**重新 GET `/logoff`** 读门户状态
+   （POST 响应页里是提交前的旧值）；`_confirm_offline()` 改为门户状态优先，外网探测仅作补充；
+   GUI 状态栏与「断开前是否已离线」同样以门户状态为准。
+   —— 本节同时**推翻** 18:15 的「只用 HTTPS 单源」决定：单源 HTTPS 在本网络不可达，
+   改多源后既保留内容校验、又不再误判。
+
+**验证**（真实凭据，全部实测）
+
+| 检查 | 命令 / 方式 | 结果 |
+| --- | --- | --- |
+| 登录判定 | `diagnose_guit.py` | `ok=True message=联网成功!`（不再依赖外网探测兜底） |
+| 门户成功原文 | 同上（留存 `diag\03-POST-login.html`） | `summary=联网成功!`，页面仍含验证码框 → 判据必须认文案 |
+| ViewState 守卫 | `verify_patches.py` A 组 | 错配提交被拒：`kind=captcha`、`注销页状态已刷新，请重新输入验证码`，`form_source` 复位为 `logoff` |
+| 验证码 epoch | `verify_patches.py` B 组 | `0 → 1 → 2` 递进正常 |
+| 多源在线探测 | `verify_patches.py` C 组（首选源设为不可达的 HTTPS） | `is_online=True`，1.12 秒（降级成功） |
+| **真实注销** | `verify_logoff_v2.py` | `ok=True 已断开网络（门户已确认下线）`，**耗时 0.06 秒**（旧实现 13.6 秒） |
+| **注销后门户状态** | 同上 | `未联网`（门户即时生效）；外网仍可达 → 证实出口不由门户控制 |
+| **立即重连** | 同上 | 第 1 次 OCR 错 → 自动换码；第 2 次 `联网成功!`，门户回到 `已联网` |
+| 语法 | `.venv\Scripts\python.exe -m py_compile src\portal_client.py src\app.py` | 通过 |
+
+**影响文件**：`src\portal_client.py`、`src\app.py`、`docs\DIAGNOSIS-20261013.md`（新增）
+
+**回滚点**：`temp\output\backup-20261013\`（原 `portal_client.py`、`app.py`、`config.json`、`CHANGELOG.md`、旧 exe）
+
+**遗留（网络侧现实，非程序缺陷）**：注销后外网仍可达 → 这条出口连接不由该门户会话控制
+（路由器 / 其他设备 / 其他认证通道）。程序现如实提示，不再谎报失败。
+
 ## 2026-10-13 18:15 在线探测改用 HTTPS（修复离线误判为在线）
 
 **问题**（用户实测：网页注销断网后，程序点「连接」却提示「网络已连通，无需登录」）

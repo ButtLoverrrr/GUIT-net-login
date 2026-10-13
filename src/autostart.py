@@ -14,7 +14,9 @@ import sys
 
 LNK_NAME = "校园网自动登录.lnk"
 CMD_NAME = "校园网自动登录.cmd"
-SILENT_ARG = "--silent"
+# 自启参数：正常打开界面，并在网络就绪后自动连接。
+# （早期版本用 --silent：只登录、不显示窗口，用户看不到程序在不在跑）
+AUTOSTART_ARG = "--autostart"
 CREATE_NO_WINDOW = 0x08000000
 
 
@@ -49,11 +51,11 @@ def _launch_command() -> tuple:
     """
     if getattr(sys, "frozen", False):
         exe = os.path.abspath(sys.executable)
-        return exe, SILENT_ARG, os.path.dirname(exe)
+        return exe, AUTOSTART_ARG, os.path.dirname(exe)
     pyw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
     exe = pyw if os.path.exists(pyw) else sys.executable
     app_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.py")
-    return exe, '"%s" %s' % (app_py, SILENT_ARG), os.path.dirname(app_py)
+    return exe, '"%s" %s' % (app_py, AUTOSTART_ARG), os.path.dirname(app_py)
 
 
 def enable() -> tuple:
@@ -94,6 +96,54 @@ def enable() -> tuple:
         return True, cmd_path()
     except Exception as exc:
         return False, "创建自启失败：%s" % exc
+
+
+def read_lnk() -> tuple:
+    """读取现有 .lnk 的 (TargetPath, Arguments)；读不到返回 ("", "")。"""
+    path = lnk_path()
+    if not os.path.exists(path):
+        return "", ""
+    # 先设 stdout 为 UTF-8：否则中文路径在 PowerShell 5.1 下会按 GBK 输出、解析错乱
+    script = (
+        "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
+        "$ws = New-Object -ComObject WScript.Shell;"
+        "$sc = $ws.CreateShortcut('%s');"
+        "Write-Output ($sc.TargetPath + '|' + $sc.Arguments)" % path
+    )
+    try:
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True,
+            timeout=30,
+            creationflags=CREATE_NO_WINDOW,
+        )
+        text = (completed.stdout or b"").decode("utf-8", "ignore").strip()
+        if "|" in text:
+            target, args = text.split("|", 1)
+            return target.strip(), args.strip()
+    except Exception:
+        pass
+    return "", ""
+
+
+def ensure_current() -> tuple:
+    """自启项必须指向**当前正在运行的这个程序**，否则重建它。
+
+    为什么需要：早期版本在源码模式下生成过指向 `pythonw.exe src/app.py` 的 .lnk，
+    而源码模式的配置目录（项目根）并没有 config.json —— 开机自启时程序读不到
+    账号，只会弹一个空窗口。启动时做一次校正即可自愈。
+    """
+    if os.path.exists(cmd_path()) and not os.path.exists(lnk_path()):
+        return enable()  # 旧的 .cmd 载体：重建为规范形态（.lnk）
+    exe, _args, _workdir = _launch_command()
+    target, current_args = read_lnk()
+    same_target = os.path.normcase(os.path.abspath(target or "")) == os.path.normcase(exe)
+    if same_target and AUTOSTART_ARG in (current_args or ""):
+        return True, "自启项已指向当前程序（%s）" % exe
+    ok, message = enable()
+    if ok:
+        return True, "已把自启项校正为当前程序：%s" % exe
+    return False, message
 
 
 def disable() -> tuple:

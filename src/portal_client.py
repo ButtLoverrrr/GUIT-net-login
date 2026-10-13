@@ -29,6 +29,25 @@ HIDDEN_FIELDS = (
     "__EVENTVALIDATION",
 )
 
+# 门户在 validation-summary 里给出的成功文案。
+# 实测：本门户**登录成功时仍渲染登录页样式**（含验证码框与登录按钮），
+# 只在提示块里写「联网成功!」，因此成功判定必须认文案，不能只看页面是否跳转。
+#
+# 注意：**不要**把泛化的「成功」放进来——异常页、维护通知里也可能出现该词，
+# 会把失败报成成功。登录与注销各用一组明确的文案。
+LOGIN_SUCCESS_WORDS = ("联网成功", "登录成功")
+LOGOFF_SUCCESS_WORDS = ("断开成功", "注销成功")
+
+# 在线探测候选：按序降级，任一命中即视为已联网。
+# 实测本网络 https://www.msftconnecttest.com 与 https://connectivitycheck.gstatic.com
+# 的 TLS 被阻断（curl 返回 000），只用单一 HTTPS 源会把「已联网」判成离线。
+ONLINE_PROBES = (
+    ("http://www.msftconnecttest.com/connecttest.txt", "Microsoft Connect Test"),
+    ("http://www.gstatic.com/generate_204", ""),
+    ("https://www.baidu.com", "baidu"),
+    ("http://www.baidu.com", "baidu"),
+)
+
 # 结果分类：决定上层是重试（captcha）还是直接报错（credential）
 KIND_OK = "ok"
 KIND_CAPTCHA = "captcha"
@@ -84,6 +103,13 @@ class PortalClient:
         self.opener.addheaders = [("User-Agent", USER_AGENT)]
         self.hidden = {}
         self.defaults = {}  # 页面各输入控件的默认值，提交时原样带回
+        # 当前 hidden/defaults 来自哪个页面（"login" / "logoff"）。
+        # 两页的 __VIEWSTATE 与 __EVENTVALIDATION 不通用：实测拿登录页的
+        # ViewState 去 POST /logoff，门户只回一个 2530 字节的无提示空壳页。
+        self.form_source = ""
+        # 验证码代数：同一会话每取一次码 +1。实测取新码会让上一张立即失效，
+        # 上层用它判断「界面上那张码是否还能用」。
+        self.captcha_epoch = 0
 
     # ------------------------------------------------------------------ 网络
     def _request(self, url: str, data: bytes = None):
@@ -99,25 +125,35 @@ class PortalClient:
 
     # -------------------------------------------------------------- 在线探测
     def is_online(self) -> bool:
-        """探测外网可达性；校验响应内容，避免门户劫持重定向造成误判。
+        """探测外网可达性；多源降级，任一命中即视为已联网。
 
-        必须用 **HTTPS**：HTTP 明文探测在校园网未认证状态下会被门户劫持或
-        特殊处理，实测曾导致离线时误判为在线（用户网页注销后程序仍认为
-        已联网）。HTTPS 无法被透明伪造——离线时 TLS 握手必然失败，
-        这里会因异常而正确返回 False。
+        必须绕开系统代理，并校验响应内容，避免门户劫持重定向造成误判。
+        为什么用多源：实测本网络 `https://www.msftconnecttest.com/connecttest.txt`
+        与 `https://connectivitycheck.gstatic.com/generate_204` 均不可达
+        （TLS 被阻断，curl 返回 000），只探测单一 HTTPS 源会把「已联网」
+        判成离线，进而把成功的登录/断网误报为失败。
         """
         probe = self.cfg.get("onlineProbe") or {}
-        url = probe.get("url", "https://www.msftconnecttest.com/connecttest.txt")
-        expect = probe.get("expect", "Microsoft Connect Test")
         timeout = int(probe.get("timeout", 4) or 4)
-        try:
-            # 同样绕开代理：探测的是「出口网络是否已放行」，走代理会误判
-            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-            with opener.open(url, timeout=timeout) as resp:
-                body = resp.read(128).decode("utf-8", "ignore")
-            return expect in body
-        except Exception:
-            return False
+        candidates = []
+        if probe.get("url"):
+            candidates.append((probe["url"], probe.get("expect", "")))
+        candidates.extend(ONLINE_PROBES)
+
+        for url, expect in candidates:
+            try:
+                # 同样绕开代理：探测的是「出口网络是否已放行」，走代理会误判
+                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                with opener.open(url, timeout=timeout) as resp:
+                    if expect:
+                        body = resp.read(256).decode("utf-8", "ignore")
+                        if expect in body:
+                            return True
+                    elif getattr(resp, "status", 200) == 204:
+                        return True
+            except Exception:
+                continue
+        return False
 
     def _parse_form_defaults(self, html: str) -> dict:
         """解析页面上所有输入控件的默认值。
@@ -149,16 +185,27 @@ class PortalClient:
         if "__VIEWSTATE" not in self.hidden:
             raise PortalError("登录页解析失败：未找到 __VIEWSTATE（门户可能已改版）")
         self.defaults = self._parse_form_defaults(html)
+        self.form_source = "login"
 
     def fetch_captcha(self) -> bytes:
-        """获取验证码图片（PNG）。"""
+        """获取验证码图片（PNG）。
+
+        取码会使同会话上一张码失效（实测），因此这里推进 captcha_epoch，
+        供上层判断界面上的码是否过期。
+        """
         data = self._request(self.cfg["captchaUrl"])
         if not data or data[:4] != b"\x89PNG":
             raise PortalError("验证码获取失败（未返回 PNG）")
+        self.captcha_epoch += 1
         return data
 
     # ------------------------------------------------------------------ 提交
     def submit(self, guid: str, acc: str, pwd: str, captcha: str) -> LoginResult:
+        # 来源守卫：上一次可能取的是注销页，两页的 __VIEWSTATE / __EVENTVALIDATION
+        # 不通用（实测错配会让门户返回无提示的异常页）。与 submit_logoff 对称。
+        if self.form_source != "login":
+            self.open_session()
+
         # 页面上各控件的默认值（含 ISP 等）+ 隐藏字段，再用用户填写的内容覆盖
         fields = dict(self.defaults)
         fields.update(self.hidden)
@@ -175,19 +222,41 @@ class PortalClient:
         result = self._judge(html)
         if result.ok:
             return result
-        # 门户未给出明确原因时，用联网探测二次确认（部分门户成功页仍是登录页样式）
-        if result.kind == KIND_UNKNOWN and self.is_online():
-            return LoginResult(True, "登录成功（联网探测确认）", KIND_OK)
-        return result
+        if result.kind != KIND_UNKNOWN:
+            return result
+
+        # 门户没给出明确提示：**改用门户状态复核**。
+        # 绝不拿「外网是否可达」当登录成功的依据——实测未认证时
+        # baidu / gstatic / msftconnecttest 全都可达（放行白名单），
+        # 用它确认会把失败报成成功（旧实现就是这么误报的）。
+        status = self.refresh_portal_status()
+        if status.text != "未知" and status.online:
+            return LoginResult(True, "登录成功（门户状态显示已联网）", KIND_OK)
+        return LoginResult(
+            False,
+            result.message or "登录结果无法确认：门户未给出明确提示，请稍后查看状态",
+            KIND_UNKNOWN,
+        )
 
     def _judge(self, html: str) -> LoginResult:
-        """按响应内容判定成败并分类。"""
+        """按响应内容判定成败并分类（纯函数，不发请求）。
+
+        判定顺序（依据实测的门户行为）：
+        1. 先认门户的**登录成功文案**（实测登录成功 = 「联网成功!」，此时页面
+           仍是登录页样式）；不采用泛化的「成功」，避免异常页误判；
+        2. 仍是登录页 → 按文案分类 captcha / credential / unknown；
+        3. 响应里没有登录控件 —— **不直接判成功**（门户改版、维护页、错误页
+           都长这样），返回 unknown 交给 submit() 用门户状态复核。
+        """
+        text = self._extract_error(html)
+        if text and "验证码" not in text and any(w in text for w in LOGIN_SUCCESS_WORDS):
+            return LoginResult(True, text, KIND_OK)
+
         names = self.cfg["fields"]
         still_login_page = (
             names["captcha"] in html or names["submit"] in html
         )
         if still_login_page:
-            text = self._extract_error(html)
             if "验证码" in text:
                 kind = KIND_CAPTCHA
             elif "密码" in text or "账号" in text or "锁定" in text:
@@ -195,7 +264,11 @@ class PortalClient:
             else:
                 kind = KIND_UNKNOWN
             return LoginResult(False, text or "登录失败（门户返回登录页）", kind)
-        return LoginResult(True, "登录成功", KIND_OK)
+        return LoginResult(
+            False,
+            text or "门户未返回登录页，登录结果待确认",
+            KIND_UNKNOWN,
+        )
 
     @staticmethod
     @staticmethod
@@ -261,14 +334,53 @@ class PortalClient:
         captcha = self._request(self.cfg["captchaUrl"])
         if not captcha or captcha[:4] != b"\x89PNG":
             raise PortalError("验证码获取失败（未返回 PNG）")
+        # 注销页的 ViewState 已就位，且这张码是当前会话最后一张
+        self.form_source = "logoff"
+        self.captcha_epoch += 1
         return captcha, status
 
-    def _confirm_offline(self, ok_message: str, fallback: str = "") -> LoginResult:
-        """用外网探测确认是否真的断开。
+    def invalidate_form(self) -> None:
+        """作废当前缓存的表单状态：下一次提交前必须重新取页面。
 
-        门户确认注销很快，但**网络生效有延迟**（实测提交后 2 秒仍可上网），
-        状态 span 的刷新同样滞后，因此最多探测 3 次、每次间隔 4 秒。
+        注销页与登录页的 __VIEWSTATE / __EVENTVALIDATION 不通用；注销成功后
+        必须清掉，否则紧接着的登录会拿注销页的字段提交，门户只会返回一个
+        无提示的异常页（实测 2530 字节空壳）。
         """
+        self.form_source = ""
+        self.hidden = {}
+        self.defaults = {}
+
+    def refresh_portal_status(self) -> PortalStatus:
+        """重新 GET 注销页读取门户状态（只读，不覆盖表单状态）。
+
+        必须重新取：POST /logoff 的响应页里渲染的是**提交前**的旧状态
+        （实测提交后该页仍写「已联网」，紧接着的 GET /logoff 才变成「未联网」）。
+        """
+        try:
+            html = self._request(self.logoff_url()).decode("utf-8", "ignore")
+            return self._parse_status(html)
+        except PortalError:
+            return PortalStatus()
+
+    def _confirm_offline(self, ok_message: str, fallback: str = "",
+                         portal_status: "PortalStatus" = None) -> LoginResult:
+        """确认断开：**以门户状态为主判据**，外网探测只作补充。
+
+        为什么不以外网可达为准（实测依据）：本机提交注销后门户状态变成
+        「未联网」，但外网依旧可达——这条出口连接并不由该门户会话控制
+        （路由器 / 其他设备 / 其他认证通道）。若按外网判定，会永远得到
+        「断开未生效」的结论，把已经成功的注销报成失败。
+
+        顺序：
+        1. 重新读门户状态，显示「未联网」→ 直接成功（实测亚秒级，无需等待）；
+        2. 否则最多探测 3 次、每次间隔 4 秒，确认是否真的断网；
+        3. 门户已受理但本机外网仍通 → 如实说明，不谎报失败。
+        """
+        fresh = self.refresh_portal_status()
+        if fresh.text != "未知" and not fresh.online:
+            return LoginResult(True, ok_message + "（门户已确认下线）", KIND_OK)
+        if portal_status is not None and portal_status.text != "未知" and not portal_status.online:
+            return LoginResult(True, ok_message + "（门户已确认下线）", KIND_OK)
         for _ in range(3):
             time.sleep(4)
             try:
@@ -277,26 +389,30 @@ class PortalClient:
             except Exception:
                 pass
         if fallback:
-            return LoginResult(
-                False,
-                "断开未生效：当前网络可能不是本程序建立的连接。"
-                "若你是通过浏览器等其他方式连接的网络，请从对应渠道断开；"
-                "或者先用本程序「连接」上网，再使用「断开网络」。",
-                KIND_UNKNOWN,
-            )
-        # 门户已明确确认成功，只是生效较慢：按成功处理并说明
-        return LoginResult(True, ok_message + "（生效略有延迟）", KIND_OK)
+            return LoginResult(False, fallback, KIND_UNKNOWN)
+        return LoginResult(
+            True,
+            ok_message + "（门户已受理；本机外网仍可达，说明这条连接可能不由门户控制）",
+            KIND_OK,
+        )
 
     def submit_logoff(self, captcha: str) -> LoginResult:
         """提交注销（断开网络）。
 
         判定顺序（依据实测的门户行为）：
+        0. **先检查表单来源**：若中途调用过 prepare()（启动预取 / 点「换一张」），
+           self.hidden 已被登录页的 ViewState 覆盖，拿它提交只会拿到门户的
+           无提示空壳页（实测 2530 字节），因此这里直接刷新注销页并让界面重新输码；
         1. 门户把「注销成功!」「验证码错误!」都放在 validation-summary 块里，
-           先看提取到的提示文字——含「成功」即成功，含「验证码」即验证码错误；
-           （曾把「注销成功!」当失败信息返回，是断开功能误报的原因）
-        2. 否则按响应页的状态 span 判定；
-        3. 都不明确时用外网探测做最终判定（生效有延迟，见 _confirm_offline）。
+           先看提取到的提示文字——含「验证码」即验证码错误；
+        2. 成功文案「成功」或状态 span 显示未联网 → 交 _confirm_offline（门户优先）；
+        3. 都不明确时用外网探测做最终判定（见 _confirm_offline）。
         """
+        if self.form_source != "logoff":
+            self.prepare_logoff()
+            return LoginResult(
+                False, "注销页状态已刷新，请重新输入验证码", KIND_CAPTCHA
+            )
         names = self.cfg.get("logoffFields") or {}
         fields = dict(self.defaults)
         fields.update(self.hidden)
@@ -310,20 +426,25 @@ class PortalClient:
         text = self._extract_error(html)
         if "验证码" in text:
             return LoginResult(False, text or "验证码错误", KIND_CAPTCHA)
-        if "成功" in text:
-            # 门户已确认注销，网络生效可能有延迟，用外网探测复核
-            return self._confirm_offline("已断开网络")
 
         status = self._parse_status(html)
-        if status.text != "未知" and not status.online:
-            return LoginResult(True, "已断开网络", KIND_OK)
-        if text:
+        portal_offline = status.text != "未知" and not status.online
+        if any(w in text for w in LOGOFF_SUCCESS_WORDS) or portal_offline:
+            result = self._confirm_offline("已断开网络", portal_status=status)
+        elif text:
             return LoginResult(False, text, KIND_UNKNOWN)
-        # 门户未给出任何明确反馈：外网探测做最终判定
-        return self._confirm_offline(
-            "已断开网络（联网探测确认）",
-            fallback="断开失败：门户未确认状态变化",
-        )
+        else:
+            # 门户未给出任何明确反馈：交 _confirm_offline，它先读门户状态、
+            # 外网探测只作补充（外网可达不等于门户会话仍在线，也不等于断开失败）
+            result = self._confirm_offline(
+                "已断开网络（联网探测确认）",
+                fallback="断开失败：门户未确认状态变化",
+                portal_status=status,
+            )
+        if result.ok:
+            # 注销用的 ViewState 不能留给后续登录（两页不通用）
+            self.invalidate_form()
+        return result
 
 
 class LoginSession:
@@ -339,6 +460,24 @@ class LoginSession:
 
     def is_online(self) -> bool:
         return self.client.is_online()
+
+    def needs_login(self) -> bool:
+        """是否需要登录：**以门户状态为准**，外网探测只在门户状态未知时兜底。
+
+        实测依据（这是「软件点连接一直连不上」的根因）：
+        门户显示「未联网」时，本机外网探测依旧全都可达（baidu / gstatic /
+        msftconnecttest 实测 200/204），这些目标显然是未认证状态下的放行白名单。
+        旧逻辑用外网可达判断，于是软件直接回「网络已连通，无需登录」——
+        **根本没有提交登录**，门户侧始终未认证；用户看到的就是「连不上」，
+        只能自己去网页门户登录。
+        """
+        try:
+            status = self.query_status()
+        except PortalError:
+            return not self.is_online()
+        if status.text != "未知":
+            return not status.online
+        return not self.is_online()
 
     def prepare(self) -> bytes:
         """开启新会话并获取验证码图片，返回 PNG 字节。"""
@@ -377,8 +516,8 @@ def auto_login(cfg: dict, logger, ocr=None, on_captcha=None) -> LoginResult:
     max_retry = int(cfg.get("maxCaptchaRetry", 3) or 3)
     session = LoginSession(cfg, logger)
 
-    if session.is_online():
-        logger.info("网络已连通，无需登录")
+    if not session.needs_login():
+        logger.info("门户显示已联网，无需登录")
         return LoginResult(True, "网络已连通，无需登录", KIND_OK)
 
     last_png = b""

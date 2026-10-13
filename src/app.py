@@ -111,6 +111,12 @@ WM_CLOSE = 0x0010
 SINGLE_INSTANCE_PORT = 47823
 # 验证码显示放大倍数：实测门户原图仅 80x24 像素，放大 4 倍约 320x96，肉眼可辨
 CAPTCHA_ZOOM = 4
+# 开机自启的自动连接：最多尝试次数与两次之间的间隔。
+# 开机瞬间网卡 / DHCP 常未就绪，一次失败就放弃体验很差，故按间隔重试；
+# 是否已成功以**门户状态**判定（未认证时外网探测照样可达，不可用）。
+AUTO_CONNECT_MAX_ATTEMPT = 3
+AUTO_CONNECT_INTERVAL_MS = 12000
+# 断开网络与连接使用同一套验证码自动识别重试次数（配置 maxCaptchaRetry）
 # 项目主页（界面上显示并可点击打开）
 PROJECT_URL = "https://github.com/ButtLoverrrr/GUIT-net-login"
 # 免责声明：明确工具定位，避免被误解为破解/绕过工具
@@ -155,12 +161,14 @@ def run_silent() -> int:
 class LoginApp:
     """「联网设置」主窗口。"""
 
-    def __init__(self, root: tk.Tk):
+    def __init__(self, root: tk.Tk, auto_connect: bool = False):
         self.root = root
         self.cfg = load_config()
         self.ocr = OcrEngine()
         self.session = None
         self.busy = False
+        # 开机自启（--autostart）：窗口出现后自动执行一次「连接」，未成功按间隔重试
+        self.auto_connect = auto_connect
         self.ui_queue = queue.Queue()
         self.logger = Logger("GUI")
         # 日志只进界面，不落盘（见 app_logger 模块说明）
@@ -168,6 +176,9 @@ class LoginApp:
         self.photo = None
         self.tray_icon = None
         self.captcha_purpose = "login"  # 当前显示的验证码用途：login / logoff
+        # 界面当前这张验证码属于哪个 epoch（客户端每取一次码 +1）。与客户端当前值
+        # 不一致即说明这张码已被后续取码作废（实测：同会话取新码会让旧码立即失效）。
+        self.captcha_epoch = -1
         self._net_online = False
         self._build_ui()
         self._pump_queue()
@@ -353,6 +364,11 @@ class LoginApp:
             self._append_log("首次使用：请填写账号信息后点击「连接」")
         # 窗口出现后立即后台预取验证码，用户无需先点「连接」即可看到
         self.root.after(200, self._start_prefetch)
+        # 开机自启：等预取与网络就绪后自动连接；同时校正自启快捷方式指向当前程序
+        if self.auto_connect:
+            self._append_log("开机自动登录：等待网络就绪后自动连接")
+            self.root.after(1500, self._auto_connect_step)
+        threading.Thread(target=self._check_autostart, daemon=True).start()
 
     def _pump_queue(self) -> None:
         try:
@@ -376,6 +392,9 @@ class LoginApp:
         elif kind == "captcha":
             self._show_captcha(args[0])
             self.var_captcha.set(args[1] if len(args) > 1 and args[1] else "")
+            if self.session is not None:
+                # 记住「界面这张码」的代数，提交前据此判断是否过期
+                self.captcha_epoch = self.session.client.captcha_epoch
         elif kind == "busy":
             self._set_busy(bool(args[0]), args[1] if len(args) > 1 else None)
         elif kind == "net":
@@ -610,8 +629,19 @@ class LoginApp:
             return
         if not self._collect_form():
             return
-        # 若输入框里是「注销用」验证码，登录需重新获取，避免误用失效验证码
-        manual = "" if self.captcha_purpose == "logoff" else self.var_captcha.get().strip()
+        # 三种情况都不能用输入框里的验证码，改走「重新取码 + OCR」的自动流程：
+        # 1) 框里是「注销用」的码；
+        # 2) 这张码已被后续取码作废（epoch 不一致，实测取新码会让旧码立即失效）；
+        # 3) 客户端缓存的表单不是登录页的——注销成功后 ViewState 仍来自注销页，
+        #    而两页不通用，拿它提交登录只会拿到门户的无提示异常页。
+        client = self.session.client if self.session is not None else None
+        current = client.captcha_epoch if client is not None else -1
+        stale = current != self.captcha_epoch
+        wrong_form = client is None or client.form_source != "login"
+        manual = ("" if (self.captcha_purpose == "logoff" or stale or wrong_form)
+                  else self.var_captcha.get().strip())
+        if stale and self.var_captcha.get().strip():
+            self._append_log("当前验证码已过期，已自动重新获取")
         self.captcha_purpose = "login"
         self._set_busy(True)
         threading.Thread(target=self._worker, args=(manual,), daemon=True).start()
@@ -619,10 +649,14 @@ class LoginApp:
     def _worker(self, manual: str) -> None:
         try:
             self._ensure_session()
-            if self.session.is_online():
+            # 是否需要登录以**门户状态**为准：未认证时外网探测照样可达
+            # （放行白名单），按外网判断会导致软件直接回「无需登录」而不提交登录。
+            if not self.session.needs_login():
                 self._post("done", True, "网络已连通，无需登录")
                 return
-            if manual and self.session.client.hidden:
+            client = self.session.client
+            # 只有「表单确实来自登录页」才用手输值，否则交给自动流程重新取码
+            if manual and client.form_source == "login":
                 self._submit_manual(manual)
             else:
                 self._auto_flow()
@@ -706,7 +740,11 @@ class LoginApp:
             try:
                 self._ensure_session()
                 status = self.session.query_status()
-                online = self.session.is_online()
+                # 门户状态是权威判据：实测本机出口可能有旁路通道（路由器 / 其他
+                # 设备），注销后外网依旧可达，但门户已明确显示「未联网」。
+                # 仅在门户未给出状态（未知）时才退回外网探测。
+                online = (self.session.is_online() if status.text == "未知"
+                          else status.online)
                 self._post("net", online, status.ip)
             except Exception:
                 pass
@@ -721,10 +759,28 @@ class LoginApp:
         threading.Thread(target=self._logoff_worker, args=(captcha,), daemon=True).start()
 
     def _logoff_worker(self, captcha: str) -> None:
-        """断开网络：首次点击取注销页与验证码，再次点击（带验证码）提交注销。"""
+        """断开网络。
+
+        两条路径：
+        1. 手输优先：界面上的注销验证码仍有效且用户填了值 → 直接提交；
+        2. **自动**：取注销页 + 取码 → OCR 识别 → 提交；验证码错就换码重试，
+           连续失败才提示手输；OCR 不可用（lite 构建）时退回手输。
+        判定是否已断开一律以门户状态为准（注销页的 span 对本机 IP 判定准确）。
+        """
         try:
             self._ensure_session()
-            ready = self.captcha_purpose == "logoff" and bool(self.session.client.hidden)
+            client = self.session.client
+            use_ocr = self._use_ocr()
+            max_retry = max(1, int(self.cfg.get("maxCaptchaRetry", 3) or 3)) if use_ocr else 1
+            # 必须同时满足：用途是注销、ViewState 来自注销页、这张码没过期
+            ready = (
+                self.captcha_purpose == "logoff"
+                and client.form_source == "logoff"
+                and client.captcha_epoch == self.captcha_epoch
+                and bool(client.hidden)
+            )
+
+            # ---------- 路径 1：用户已手输验证码 ----------
             if captcha and ready:
                 result = self.session.submit_logoff(captcha)
                 if result.ok:
@@ -732,28 +788,46 @@ class LoginApp:
                     self._post("net", False, "")
                     self._post("done", True, result.message)
                     return
-                if result.kind == KIND_CAPTCHA:
-                    png, status = self.session.prepare_logoff()
-                    self._post("net", status.online, status.ip)
-                    self._post("captcha", png, "")
-                    self._post("warn", "验证码错误，已换一张，请重新输入后再次点击「断开网络」")
+                if result.kind != KIND_CAPTCHA:
+                    self._post("done", False, result.message)
+                    return
+                self._post("warn", "验证码错误，换一张重试")
+
+            # ---------- 路径 2：自动识别 ----------
+            for attempt in range(1, max_retry + 1):
+                png, status = self.session.prepare_logoff()
+                self.captcha_purpose = "logoff"
+                self._post("net", status.online, status.ip)
+                self._post("captcha", png, "")
+                # 门户已显示未联网 → 无需断开（注销页的状态判定准确）
+                if status.text != "未知" and not status.online:
+                    self._post("info", "门户显示当前未联网，无需断开")
+                    self._post("done", True, "当前未联网")
+                    return
+                if not use_ocr:
+                    self._post("info", "已获取注销验证码，请输入后再次点击「断开网络」")
                     self._post("done", False, "")
                     return
-                self._post("done", False, result.message)
-                return
 
-            png, status = self.session.prepare_logoff()
-            self.captcha_purpose = "logoff"
-            self._post("net", status.online, status.ip)
-            self._post("captcha", png, "")
-            # 注意：门户状态 span 是「会话视角」——若用户网络是浏览器等其他
-            # 方式连接的，门户对程序会话会显示「未联网」，与真实网络无关。
-            # 因此这里用外网探测判断，而不是 status.online。
-            if not self.session.is_online():
-                self._post("info", "当前未联网，无需断开")
-                self._post("done", True, "当前未联网")
-                return
-            self._post("info", "已获取注销验证码，请输入后再次点击「断开网络」")
+                guess = self.ocr.classify(png)
+                if not guess:
+                    self._post("info", "自动识别失败，请输入验证码后再次点击「断开网络」")
+                    self._post("done", False, "")
+                    return
+                self._post("info", "验证码识别为 %s，正在断开…" % guess)
+                result = self.session.submit_logoff(guess)
+                if result.ok:
+                    self.captcha_purpose = "login"
+                    self._post("net", False, "")
+                    self._post("done", True, result.message)
+                    return
+                if result.kind != KIND_CAPTCHA:
+                    self._post("done", False, result.message)
+                    return
+                self._post("warn", "验证码识别错误，换一张重试（%d/%d）" % (attempt, max_retry))
+
+            self._post("warn", "连续 %d 次自动识别失败，请输入验证码后再次点击「断开网络」"
+                       % max_retry)
             self._post("done", False, "")
         except PortalError as exc:
             self._post("done", False, str(exc))
@@ -772,8 +846,9 @@ class LoginApp:
     def _prefetch_worker(self) -> None:
         try:
             self._ensure_session()
-            online = self.session.is_online()
-            # 无论是否已联网，都把验证码拉回来显示，避免窗口上空着一块
+            # 是否需要登录以门户状态为准（未认证时外网探测照样可达）
+            needs_login = self.session.needs_login()
+            # 无论是否需要登录，都把验证码拉回来显示，避免窗口上空着一块
             png = self.session.prepare()
             use_ocr = self._use_ocr()
             guess = self.ocr.classify(png) if use_ocr else ""
@@ -790,8 +865,8 @@ class LoginApp:
                 self._post("net", status.online, status.ip)
             except PortalError:
                 self._post("net", False, "")
-            if online:
-                self._post("info", "网络已连通，无需登录（验证码仅供参考）")
+            if not needs_login:
+                self._post("info", "门户显示已联网，无需登录（验证码仅供参考）")
             elif guess:
                 self._post("info", "验证码已识别为 %s，可直接点「连接」" % guess)
             else:
@@ -802,6 +877,51 @@ class LoginApp:
             self._post("warn", "验证码获取失败：%s" % exc)
         finally:
             self._post("busy", False)
+
+    # ------------------------------------------------ 开机自启：自动连接与自启项校正
+    def _auto_connect_step(self, attempt: int = 1) -> None:
+        """开机自启（--autostart）：窗口出现后自动点一次「连接」。
+
+        判定是否已成功用**门户状态**（self._net_online）：未认证时外网探测
+        照样可达（放行白名单），拿它判断会误判成「已连通」而不去登录。
+        开机瞬间网络常未就绪，因此失败按固定间隔重试，最多 AUTO_CONNECT_MAX_ATTEMPT 次。
+        """
+        if not self.auto_connect:
+            return
+        if self._net_online:
+            self._append_log("开机自动登录：门户显示已联网，不再重试")
+            return
+        if attempt > AUTO_CONNECT_MAX_ATTEMPT:
+            self._append_log("开机自动登录：已尝试 %d 次仍未确认成功，请手动点「连接」"
+                             % AUTO_CONNECT_MAX_ATTEMPT)
+            return
+        if self.busy:
+            self.root.after(3000, lambda: self._auto_connect_step(attempt))
+            return
+        if not has_credential(self.cfg):
+            self._append_log("开机自动登录：尚未配置账号，跳过自动连接")
+            return
+        self._append_log("开机自动登录：正在连接（第 %d/%d 次）"
+                         % (attempt, AUTO_CONNECT_MAX_ATTEMPT))
+        self._on_connect()
+        self.root.after(
+            AUTO_CONNECT_INTERVAL_MS, lambda: self._auto_connect_step(attempt + 1)
+        )
+
+    def _check_autostart(self) -> None:
+        """启动时校正自启快捷方式：让它始终指向**当前正在运行的这个程序**。
+
+        背景：早期版本在源码模式下生成的 .lnk 指向 `pythonw.exe src/app.py`，
+        而源码模式的配置目录（项目根）并没有 config.json —— 开机自启时程序
+        拿不到账号，只会弹一个空窗口。这里在启动时自动纠正指向。
+        """
+        try:
+            if not autostart.is_enabled():
+                return
+            ok, message = autostart.ensure_current()
+            self.logger.info("开机自启检查：%s" % (message if ok else ("校正失败：" + message)))
+        except Exception as exc:
+            self.logger.warn("开机自启检查失败：%s" % exc)
 
 
 _MAIN_WINDOW = None  # 主窗口引用：供实例间通知唤出窗口
@@ -825,6 +945,11 @@ def _instance_listener(server) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="校园网快速登录")
     parser.add_argument("--silent", action="store_true", help="静默登录（无窗口）")
+    parser.add_argument(
+        "--autostart",
+        action="store_true",
+        help="开机自启模式：正常打开界面，并在网络就绪后自动连接",
+    )
     parser.add_argument("--console", action="store_true", help="保留控制台输出（开发用）")
     args = parser.parse_args()
 
@@ -847,7 +972,7 @@ def main() -> int:
         # 需要界面：继续往下走，打开窗口让用户手输
 
     root = tk.Tk()
-    LoginApp(root)
+    LoginApp(root, auto_connect=args.autostart)
     root.mainloop()
     return 0
 
