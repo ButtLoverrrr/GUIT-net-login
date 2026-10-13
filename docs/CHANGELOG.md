@@ -923,3 +923,54 @@ user 字段留空、`options.autoConnect=false` → 不发出真实门户请求�
 
 **提交**：已本地提交（见下），**未推送**——`scripts/**` 推送会触发 release.yml 自动加版本
 号并发布 Release，是否推送由用户决定。
+
+## 2026-10-13 21:55 fix(build)：修复 pwsh 7 下 site-packages 探测误判导致的 CI 构建失败，并完成推送
+
+**推送过程**（本机代理链路排查）
+
+| 现象 | 根因 |
+| --- | --- |
+| `git push` 报 `CRYPT_E_NO_REVOCATION_CHECK` | 证书吊销检查出不去（CRL/OCSP 被网络挡住），且 PortableGit 没带 CA bundle，换 openssl 后端也不行 |
+| 改后报 `failed to receive handshake` | 梯子分流规则把 github.com 主站放去直连（直连被墙），而 api.github.com 走节点正常——同端口下 curl 实测：baidu 200、api.github.com 200、github.com 超时 |
+| 用户调整分流后 github.com 通了，git 仍握手失败 | **git 默认协商 HTTP/2，过该代理的 CONNECT 隧道握手失败**；`git -c http.version=HTTP/1.1 push` 成功 |
+
+已把 `http.version=HTTP/1.1` 固化到仓库本地 `.git/config`，此后直接 `git push` 即可。
+
+**CI 首跑 failure 的根因与修复**
+
+- run 38407626206（afca4a0）挂在「构建 lite 与 full」步骤；本地用 pwsh 7.6.6 复现。
+- 根因：`$SitePackages = (& $Python @pyProbe | Select-Object -First 1)`——**pwsh 7 里
+  `Select-Object -First 1` 会提前终止管道，原生命令的 `$LASTEXITCODE` 变成空**，
+  随后 `if ($LASTEXITCODE -ne 0 …)` 误判为失败并 throw（Windows 宿主 5.1 无此问题，
+  所以本地 5.1 构建一直正常，CI（pwsh）必挂）。
+- 修复：先 `@(& $Python @pyProbe)` 收集输出、记下 `$probeExit`，再统一判空与取值；
+  注释里写明两处宿主差异（引号 + 管道提前终止）。
+- 验证：pwsh 7.6.6 复跑候选副本 lite 构建——探测正常、清单校验通过、退出码 0。
+
+**提交**：`git push`（HTTP/1.1）→ CI 自动重跑 Build & Release。
+
+## 2026-10-13 静态代码评审
+
+- 范围：基线 `afca4a0`，检查 `src/`、构建脚本、清单检查器、发布工作流、配置与相关调用；保留已有未跟踪优化方案。
+- 改动：仅追加本条评审记录，业务源码、构建配置、依赖、产物与已有方案均保持原样。
+- 警告（P2）：注销状态查询失败时空状态被误认为已下线；门户状态缺失时白名单外网探测使登录被跳过；注销验证码刷新错误切回登录表单；取消记忆/自启选项仅在再次连接时生效；清单检查将请求的 hiddenimports 当作已收集模块；并发发布运行会计算同一标签，造成发布失败或附件与源码标签错配。
+- 只读 Git 命令：`git status --short`、`git ls-files`、`git log -5 --oneline`、`git ls-files tests`、`git diff --stat`、`git log -1 --format='%h %s'`、`git status --porcelain=v1`、`git diff --check`。结果：基线核对完成，无已跟踪测试文件，原有唯一未跟踪文件为优化方案；检查前 diff 无空白错误。
+- Python 静态检查（项目根执行，未导入项目模块）：
+
+```powershell
+& 'D:\Dev\SDK\Python\3.13\python.exe' -I -c 'import ast,json,pathlib; root=pathlib.Path.cwd(); files=sorted((root / "src").glob("*.py"))+sorted((root / "scripts").rglob("*.py")); [(ast.parse(p.read_text(encoding="utf-8"), filename=str(p)), print("AST PASS", p.relative_to(root))) for p in files]; json.loads((root / "config.sample.json").read_text(encoding="utf-8")); print("JSON PASS config.sample.json")'
+```
+
+- 结果：8 个 Python 文件语法通过，配置样例 JSON 解析通过，退出码 0。
+- PowerShell 静态检查：
+
+```powershell
+$tokens = $null
+$errors = $null
+[void][System.Management.Automation.Language.Parser]::ParseFile('D:\Dev\Projects\GUIT-net-login\scripts\build.ps1', [ref]$tokens, [ref]$errors)
+if ($errors.Count -gt 0) { $errors | Select-Object Message, Extent; exit 1 } else { 'PowerShell syntax: PASS' }
+```
+
+- 结果：脚本语法通过，退出码 0。现有 PATH 与 SDK 中未发现 ruff、pyright、bandit；本轮未安装工具，未运行业务代码、测试、构建、GUI 或真实门户请求。
+- 核验：沿调用链复核全部发现；读取已安装 PyInstaller 源码确认缺失 hiddenimports 会记录错误后继续，而 Analysis 保留请求列表。
+- 回滚：仅撤销本节新增记录，保留原有文档与其他工作区内容。

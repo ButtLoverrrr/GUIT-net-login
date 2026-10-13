@@ -70,15 +70,18 @@ if (-not (Test-Path $Python)) {
 
 # 依赖资源的 site-packages 必须取自所选解释器，而不是本项目 .venv 的固定路径，
 # 否则在隔离副本中会指向不存在的目录。
-# 注意：探测命令里只用 Python 单引号字符串。
-# Windows 宿主 5.1 向原生命令传参会剥掉内嵌的双引号（经典引号问题），
-# 若这里写成 get_paths()["purelib"]，实际到达 Python 的是 get_paths()[purelib] → NameError。
+# 注意两处宿主差异：
+#   1. 探测命令里只用 Python 单引号字符串——Windows 宿主 5.1 向原生命令传参会剥掉
+#      内嵌的双引号（经典引号问题），写成 get_paths()["purelib"] 会收到 NameError。
+#   2. 必须先把输出收集成数组、再读 $LASTEXITCODE——pwsh 7 里「原生命令 | Select-Object
+#      -First 1」会提前终止管道，$LASTEXITCODE 变成空，导致误判失败（CI 首跑即栽在这）。
 $pyProbe = @('-c', "import sysconfig; print(sysconfig.get_paths()['purelib'])")
-$SitePackages = (& $Python @pyProbe | Select-Object -First 1)
-if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($SitePackages)) {
-    throw "无法用 $Python 定位 site-packages（退出码 $LASTEXITCODE）"
+$probeOutput = @(& $Python @pyProbe)
+$probeExit = $LASTEXITCODE
+if ($probeExit -ne 0 -or $probeOutput.Count -eq 0 -or [string]::IsNullOrWhiteSpace([string]$probeOutput[0])) {
+    throw "无法用 $Python 定位 site-packages（退出码 $probeExit）"
 }
-$SitePackages = $SitePackages.Trim()
+$SitePackages = ([string]$probeOutput[0]).Trim()
 if (-not (Test-Path $SitePackages)) {
     throw "解释器报告的 site-packages 不存在：$SitePackages"
 }
