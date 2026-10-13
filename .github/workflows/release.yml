@@ -71,14 +71,14 @@ jobs:
       - name: 写入版本号到源码
         shell: pwsh
         run: |
+          # 直接替换 app.py 内的 APP_VERSION 常量：不依赖独立模块，
+          # 避免 PyInstaller 打包时模块收集遗漏导致运行期 ModuleNotFoundError
           $v = "${{ steps.ver.outputs.version }}"
-          @(
-            '# -*- coding: utf-8 -*-',
-            '"""版本号：由发布工作流自动写入，请勿手改。"""',
-            '',
-            '__version__ = "' + $v + '"'
-          ) | Set-Content -Path src/version.py -Encoding utf8
-          Get-Content src/version.py
+          $path = "src\app.py"
+          $content = Get-Content $path -Raw -Encoding utf8
+          $content = $content -replace 'APP_VERSION = "[^"]*"', ('APP_VERSION = "' + $v + '"')
+          [System.IO.File]::WriteAllText((Resolve-Path $path).Path, $content, (New-Object System.Text.UTF8Encoding($false)))
+          Select-String -Path $path -Pattern 'APP_VERSION =' | ForEach-Object { "  已写入: " + $_.Line.Trim() }
 
       - name: 建立虚拟环境并安装依赖
         shell: pwsh

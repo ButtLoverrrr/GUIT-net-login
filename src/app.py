@@ -32,7 +32,10 @@ from portal_client import (
     PortalError,
     auto_login,
 )
-from version import __version__
+
+# 版本号：由发布工作流（.github/workflows/release.yml）在构建前自动替换此行，勿手改。
+# 直接放在 app.py 内而非独立模块，避免 PyInstaller 打包时模块收集遗漏。
+APP_VERSION = "1.0.0"
 
 APP_TITLE = "联网设置"
 DPI_AWARE = True
@@ -102,7 +105,7 @@ class LoginApp:
 
     # ------------------------------------------------------------------ 界面
     def _build_ui(self) -> None:
-        self.root.title("%s v%s" % (APP_TITLE, __version__))
+        self.root.title("%s v%s" % (APP_TITLE, APP_VERSION))
         self.root.resizable(False, False)
         font_label = ("Microsoft YaHei UI", 9)
         font_entry = ("Microsoft YaHei UI", 10)
@@ -235,7 +238,7 @@ class LoginApp:
         )
         repo_link.pack(side="left")
         repo_link.bind("<Button-1>", lambda _e: self._open_url(PROJECT_URL, "项目主页"))
-        tk.Label(repo_row, text=" v%s" % __version__, font=("Microsoft YaHei UI", 7),
+        tk.Label(repo_row, text=" v%s" % APP_VERSION, font=("Microsoft YaHei UI", 7),
                  fg="#8a99aa").pack(side="left")
 
         # 免责声明
