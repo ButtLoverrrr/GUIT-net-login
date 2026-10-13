@@ -41,6 +41,9 @@ function Build-One {
         '--noconfirm', '--clean',
         '--onefile', '--noconsole',
         '--name', "CampusNetLogin-$Name",
+        # 应用图标：--icon 用于 exe 文件图标；--add-data 让程序运行时能读到图标
+        '--icon', (Join-Path $ProjectRoot 'assets\app.ico'),
+        '--add-data', ((Join-Path $ProjectRoot 'assets') + ';assets'),
         # 显式把 src 加入模块搜索路径：app.py 里的 `from version import __version__`
         # 依赖它才能被打进单文件包（否则运行时报 No module named 'version'）
         '--paths', $SourceDir,

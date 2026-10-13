@@ -82,6 +82,7 @@ class PortalClient:
         )
         self.opener.addheaders = [("User-Agent", USER_AGENT)]
         self.hidden = {}
+        self.defaults = {}  # 页面各输入控件的默认值，提交时原样带回
 
     # ------------------------------------------------------------------ 网络
     def _request(self, url: str, data: bytes = None):
@@ -111,9 +112,25 @@ class PortalClient:
         except Exception:
             return False
 
+    def _parse_form_defaults(self, html: str) -> dict:
+        """解析页面上所有输入控件的默认值。
+
+        提交时原样带回，与浏览器行为保持一致——门户可能依赖这些字段，
+        例如登录页的 `ctl00$MainContent$TextBoxISP`（默认「自动选择」），
+        此前未提交该字段，与浏览器实际提交内容不一致。
+        """
+        defaults = {}
+        for tag in re.findall(r"<input\b[^>]*>", html, re.I):
+            name = re.search(r'\bname="([^"]*)"', tag, re.I)
+            if not name or not name.group(1):
+                continue
+            value = re.search(r'\bvalue="([^"]*)"', tag, re.I)
+            defaults[name.group(1)] = value.group(1) if value else ""
+        return defaults
+
     # ------------------------------------------------------------ 会话与页面
     def open_session(self) -> None:
-        """GET 登录页，缓存隐藏字段（新会话必须调用一次）。"""
+        """GET 登录页，缓存隐藏字段与各控件默认值（新会话必须调用一次）。"""
         html = self._request(self.cfg["portalUrl"]).decode("utf-8", "ignore")
         self.hidden = {}
         for name in HIDDEN_FIELDS:
@@ -124,6 +141,7 @@ class PortalClient:
                 self.hidden[name] = match.group(1)
         if "__VIEWSTATE" not in self.hidden:
             raise PortalError("登录页解析失败：未找到 __VIEWSTATE（门户可能已改版）")
+        self.defaults = self._parse_form_defaults(html)
 
     def fetch_captcha(self) -> bytes:
         """获取验证码图片（PNG）。"""
@@ -134,7 +152,9 @@ class PortalClient:
 
     # ------------------------------------------------------------------ 提交
     def submit(self, guid: str, acc: str, pwd: str, captcha: str) -> LoginResult:
-        fields = dict(self.hidden)
+        # 页面上各控件的默认值（含 ISP 等）+ 隐藏字段，再用用户填写的内容覆盖
+        fields = dict(self.defaults)
+        fields.update(self.hidden)
         names = self.cfg["fields"]
         fields[names["guid"]] = guid or ""
         fields[names["acc"]] = acc or guid or ""
@@ -218,6 +238,7 @@ class PortalClient:
                 self.hidden[name] = match.group(1)
         if "__VIEWSTATE" not in self.hidden:
             raise PortalError("注销页解析失败：未找到 __VIEWSTATE（门户可能已改版）")
+        self.defaults = self._parse_form_defaults(html)
         status = self._parse_status(html)
         captcha = self._request(self.cfg["captchaUrl"])
         if not captcha or captcha[:4] != b"\x89PNG":
@@ -227,7 +248,8 @@ class PortalClient:
     def submit_logoff(self, captcha: str) -> LoginResult:
         """提交注销（断开网络）。"""
         names = self.cfg.get("logoffFields") or {}
-        fields = dict(self.hidden)
+        fields = dict(self.defaults)
+        fields.update(self.hidden)
         fields[names.get("captcha", "ctl00$MainContent$TextBoxCC")] = captcha or ""
         fields[names.get("submit", "ctl00$MainContent$LogoffBtn")] = names.get(
             "submitValue", "注销"

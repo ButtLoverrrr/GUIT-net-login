@@ -15,6 +15,7 @@ import base64
 import ctypes
 import io
 import json
+import os
 import queue
 import sys
 import threading
@@ -40,7 +41,13 @@ except Exception:  # 缺 pystray 时「隐藏」退回最小化
 
 import autostart
 from app_logger import Logger
-from config_store import has_credential, load_config, remove_config, save_config
+from config_store import (
+    app_dir,
+    has_credential,
+    load_config,
+    remove_config,
+    save_config,
+)
 from ocr_helper import OcrEngine
 from portal_client import (
     KIND_CAPTCHA,
@@ -54,11 +61,23 @@ from portal_client import (
 # 直接放在 app.py 内而非独立模块，避免 PyInstaller 打包时模块收集遗漏。
 APP_VERSION = "1.0.0"
 
+
+def resource_path(name: str) -> str:
+    """资源文件（应用图标等）路径。
+
+    打包为单文件 exe 后，数据文件由 PyInstaller 解压到 sys._MEIPASS 下；
+    源码运行时则位于项目根目录的 assets 目录。
+    """
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        return os.path.join(meipass, "assets", name)
+    return os.path.join(app_dir(), "assets", name)
+
 APP_TITLE = "联网设置"
 DPI_AWARE = True
 WM_CLOSE = 0x0010
-# 验证码显示放大倍数：门户原图约 155x52，放大后手输时更易辨认
-CAPTCHA_ZOOM = 2
+# 验证码显示放大倍数：实测门户原图仅 80x24 像素，放大 4 倍约 320x96，肉眼可辨
+CAPTCHA_ZOOM = 4
 # 项目主页（界面上显示并可点击打开）
 PROJECT_URL = "https://github.com/ButtLoverrrr/GUIT-net-login"
 # 免责声明：明确工具定位，避免被误解为破解/绕过工具
@@ -124,6 +143,12 @@ class LoginApp:
     # ------------------------------------------------------------------ 界面
     def _build_ui(self) -> None:
         self.root.title("%s v%s" % (APP_TITLE, APP_VERSION))
+        ico = resource_path("app.ico")
+        if os.path.exists(ico):
+            try:
+                self.root.iconbitmap(ico)  # 标题栏与任务栏图标
+            except Exception:
+                pass
         self.root.resizable(False, False)
         font_label = ("Microsoft YaHei UI", 9)
         font_entry = ("Microsoft YaHei UI", 10)
@@ -245,16 +270,27 @@ class LoginApp:
         self.txt_log.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
 
-        # 项目地址（可点击打开）
+        # 项目地址：GitHub 图标（assets/github.png，存在才显示）+「项目地址」文字，整体可点击
         repo_row = tk.Frame(frame)
         repo_row.grid(row=11, column=0, columnspan=3, sticky="w", pady=(6, 0))
-        tk.Label(repo_row, text="项目地址：", font=("Microsoft YaHei UI", 7),
-                 fg="#8a99aa").pack(side="left")
+        gh_png = resource_path("github.png")
+        if HAS_PIL and os.path.exists(gh_png):
+            try:
+                with Image.open(gh_png) as im:
+                    side = 16
+                    self.icon_github = ImageTk.PhotoImage(
+                        im.convert("RGBA").resize((side, side), Image.LANCZOS)
+                    )
+                gh_icon = tk.Label(repo_row, image=self.icon_github, cursor="hand2", bd=0)
+                gh_icon.pack(side="left")
+                gh_icon.bind("<Button-1>", lambda _e: self._open_url(PROJECT_URL, "项目主页"))
+            except Exception:
+                pass  # 图标加载失败不影响文字链接
         repo_link = tk.Label(
-            repo_row, text=PROJECT_URL, font=("Microsoft YaHei UI", 7, "underline"),
+            repo_row, text="项目地址", font=("Microsoft YaHei UI", 9, "underline"),
             fg="#3b82d9", cursor="hand2",
         )
-        repo_link.pack(side="left")
+        repo_link.pack(side="left", padx=(3, 0))
         repo_link.bind("<Button-1>", lambda _e: self._open_url(PROJECT_URL, "项目主页"))
         tk.Label(repo_row, text=" v%s" % APP_VERSION, font=("Microsoft YaHei UI", 7),
                  fg="#8a99aa").pack(side="left")
@@ -338,8 +374,22 @@ class LoginApp:
             state="disabled" if busy else "normal",
         )
 
+    def _fit_captcha_label(self) -> None:
+        """把验证码标签按图片实际像素尺寸显示。
+
+        Tkinter 的坑：Label 一旦设置 image，width/height 的单位会从「字符数」
+        变成「像素数」。初始化时写的 width=26/height=4 本是字符占位，有图后
+        会变成强制 26x4 像素，导致验证码被压成一条细横条。
+        """
+        self.lbl_captcha.configure(
+            image=self.photo,
+            text="",
+            width=self.photo.width(),
+            height=self.photo.height(),
+        )
+
     def _show_captcha(self, png: bytes) -> None:
-        """显示验证码并放大（门户原图约 155x52，放大后便于手输）。
+        """显示验证码并放大（门户原图仅 80x24，放大后便于手输）。
 
         优先用 Pillow 解码：对各式 PNG（灰度、调色板、带透明、非标准 chunk）比
         tkinter 原生解码宽容得多，放大也更平滑；Pillow 不可用时退回 tkinter 原生。
@@ -349,17 +399,17 @@ class LoginApp:
         if HAS_PIL:
             try:
                 with Image.open(io.BytesIO(png)) as im:
-                    size = (im.width * self.CAPTCHA_ZOOM, im.height * self.CAPTCHA_ZOOM)
+                    size = (im.width * CAPTCHA_ZOOM, im.height * CAPTCHA_ZOOM)
                     big = im.convert("RGB").resize(size, Image.LANCZOS)
                 self.photo = ImageTk.PhotoImage(big)
-                self.lbl_captcha.configure(image=self.photo, text="")
+                self._fit_captcha_label()
                 return
             except Exception as exc:
                 errors.append("Pillow: %s" % exc)
         try:
             base = tk.PhotoImage(data=base64.b64encode(png).decode("ascii"))
-            self.photo = base.zoom(self.CAPTCHA_ZOOM) if self.CAPTCHA_ZOOM > 1 else base
-            self.lbl_captcha.configure(image=self.photo, text="")
+            self.photo = base.zoom(CAPTCHA_ZOOM) if CAPTCHA_ZOOM > 1 else base
+            self._fit_captcha_label()
             return
         except Exception as exc:
             errors.append("tkinter: %s" % exc)
@@ -379,7 +429,14 @@ class LoginApp:
 
     # ------------------------------------------------------------ 托盘
     def _tray_image(self):
-        """生成托盘图标：蓝色圆角底 + 白色无线信号。"""
+        """托盘图标：优先使用应用图标 assets/app.png，缺失时退回现画的图形。"""
+        path = resource_path("app.png")
+        if HAS_PIL and os.path.exists(path):
+            try:
+                return Image.open(path).convert("RGBA")
+            except Exception:
+                pass
+        # 退回：蓝色圆角底 + 白色无线信号
         size = 64
         img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
