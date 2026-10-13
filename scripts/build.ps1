@@ -20,7 +20,8 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-$EntryPoint  = Join-Path $ProjectRoot 'src\app.py'
+$SourceDir   = Join-Path $ProjectRoot 'src'
+$EntryPoint  = Join-Path $SourceDir 'app.py'
 # 用 python -m PyInstaller 而非 pyinstaller.exe：venv 的 .exe 启动器内含绝对路径，
 # 项目目录改名或移动后会失效，模块方式不受影响。
 $Python      = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
@@ -40,6 +41,9 @@ function Build-One {
         '--noconfirm', '--clean',
         '--onefile', '--noconsole',
         '--name', "CampusNetLogin-$Name",
+        # 显式把 src 加入模块搜索路径：app.py 里的 `from version import __version__`
+        # 依赖它才能被打进单文件包（否则运行时报 No module named 'version'）
+        '--paths', $SourceDir,
         '--distpath', $DistDir,
         '--workpath', (Join-Path $DistDir "_work\$Name"),
         '--specpath', $DistDir,
