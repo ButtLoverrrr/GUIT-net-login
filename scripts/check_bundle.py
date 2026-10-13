@@ -61,6 +61,23 @@ PYZ_NAME = "PYZ-00.toc"
 ANALYSIS_NAME = "Analysis-00.toc"
 
 
+def force_utf8_stdio():
+    """把 stdout/stderr 统一成 UTF-8 并容错。
+
+    CI（windows-latest）的重定向 stdout 是 charmap（cp1252），打印中文会直接
+    UnicodeEncodeError 崩掉，导致整个构建失败；本地 GBK 控制台则恰好能编过中文，
+    问题因此只在 CI 暴露。errors="replace" 保证任何环境都不再因打印崩掉。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconf = getattr(stream, "reconfigure", None)
+        if reconf is None:
+            continue
+        try:
+            reconf(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            pass
+
+
 class InputError(Exception):
     """输入缺失、损坏或结构未知。"""
 
@@ -595,6 +612,7 @@ def selftest(keep_dir: Path | None) -> int:
 
 
 def main(argv=None) -> int:
+    force_utf8_stdio()
     parser = argparse.ArgumentParser(description="PyInstaller 打包清单检查器（只读，标准库）")
     parser.add_argument("--target", choices=["full", "lite"], help="构建目标")
     parser.add_argument("--toc-dir", type=Path, help="包含 PKG-00.toc / PYZ-00.toc 的目录")
