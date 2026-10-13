@@ -2,6 +2,23 @@
 
 格式：`YYYY-MM-DD HH:mm | 操作 | 影响文件 | 验证结果 | 回滚点`
 
+## 2026-10-13 Python lite 体积优化方案补充
+
+- 改动：新增 `docs/20261013-lite-python-optimization-plan.md`，规划不更换 Python + tkinter + PyInstaller 的 lite 优化；分 L0 基线、L1 去 Pillow/pystray、L2 精简隐式内容、L3 风险选项。
+- 目标：优先评估 Tkinter 原生 `PhotoImage` 替代 Pillow 验证码显示，隐藏按钮改为最小化；full 保持 Pillow、pystray、托盘与图标。lite 目标约 10–15 MiB，仅为工程目标，不承诺“几 MB”。
+- 范围：仅新增方案文档，未修改源码、构建脚本、依赖和产物；未删除全局 requirements.txt 中 full 所需依赖。
+- 验证：文档静态编码与 `git diff --check` 见本次会话结果；未构建、未运行 OCR/GUI、未进行动态体积测量。
+- 回滚：本次仅新增方案文档和记录，保留工作区已有 agent 改动。
+
+## 2026-10-13 执行交接手册补充
+
+- 改动：新增 `docs/20261013-size-reduction-agent-handoff.md`，将体积压缩方案细化为阶段 A 的审查、备份、隔离基线、静态检查、动态审批、验收与报告步骤，附可复制 agent 指令。
+- 现状：方案和构建文件存在其他 agent 的更新；保留原文件及其验收记录，本次未修改候选代码、模型或原方案。
+- 审查提醒：上游 hook 版权与许可、TOC/PYZ 完整解析、FFmpeg 匹配范围、检查脚本退出码、隔离构建解释器路径均列入接手核对项，未宣称最新实现已完成或仍存在这些问题。
+- 检查命令：`git diff --check`；`file docs/20261013-size-reduction-agent-handoff.md`；`iconv -f UTF-8 -t UTF-8 docs/20261013-size-reduction-agent-handoff.md >/dev/null`。结果见本次交付记录；仅做文档静态检查，未运行项目、构建、OCR 或 GUI。
+- 回滚：本次仅新增交接文档与此条记录；如需撤销，仅撤销本次内容，保留他人并发修改。
+
+
 | 时间 | 操作 | 影响文件 | 验证结果 | 回滚点 |
 | --- | --- | --- | --- | --- |
 | 2026-10-13 12:14 | 由 `_TEMPLATE` 复制生成初始骨架，补建 `config\`、`logs\` | 全部 | 目录结构已核对 | 无（新建，可直接删目录） |
@@ -678,3 +695,231 @@ build\CampusNetLogin-full.exe
 # 期望证据：窗口出现「联网设置」；填入学号密码点「连接」后日志显示登录成功；系统联网正常。
 ```
 
+## 2026-10-13 20:05 体积压缩阶段 A：精确收集（去闲置 OCR 模型与 FFmpeg 组件）+ 打包清单断言
+
+**授权范围**：用户明确要求「开始阶段 A 改造 + 静态验收」。本次**只做代码改造与静态检查**，
+未执行构建、未运行 exe、未跑 OCR 推理、未联网、未安装依赖。
+
+**改动**
+
+| # | 文件 | 改动 |
+| --- | --- | --- |
+| 1 | `scripts\build.ps1` | full 目标删除 `--collect-all ddddocr`、`--collect-binaries cv2`；改为 `--hidden-import ddddocr` + `--copy-metadata ddddocr` + `--add-data <venv>\...\ddddocr\common_old.onnx;ddddocr` + `--additional-hooks-dir scripts\hooks`；打包前断言默认模型与 hook 文件存在 |
+| 2 | `scripts\hooks\hook-cv2.py` | 新增。覆盖官方 hook，从 `collect_dynamic_libs('cv2')` 结果中过滤 `opencv_videoio_ffmpeg*.dll`，其余逻辑与上游一致 |
+| 3 | `scripts\check-bundle.ps1` | 新增。只读解析 `<workpath>\GUIT-net-login-<target>\PKG-00.toc`，断言必需项存在 / 禁止项不存在，输出 ddddocr、cv2、onnxruntime 三组已收集资源的原始体积；退出码 0 通过 / 1 断言失败 / 2 清单缺失 |
+| 4 | `scripts\build.ps1` | 构建结束后自动调用 `check-bundle.ps1`，非 0 退出即 `throw`，产物视为不可发布 |
+| 5 | 编码规整 | `build.ps1`、`check-bundle.ps1` 为 UTF-8 **with BOM** + CRLF；`hook-cv2.py` 为 UTF-8 无 BOM + CRLF |
+
+改动文件哈希：
+
+| 文件 | 字节 | SHA-256 |
+| --- | ---: | --- |
+| `scripts\build.ps1` | 7864 | `55F155285F3F7E0A1C8F20609370FD82447774019330D4E2D1DBA0D129FCCAFD` |
+| `scripts\check-bundle.ps1` | 9305 | `B9D20A5A6CAA629D66F03E637CE579B495D7A952223C4FD51E74EDB8C4555692F` |
+| `scripts\hooks\hook-cv2.py` | 6101 | `44639167D6E9A6BA9A686347BC2538B1306219A48BFE38DEF21989C8BF825EAC` |
+
+**为什么这样改（读取源码与清单得到的事实，非推测）**
+
+1. `ddddocr\models\model_loader.py`：`old=False` 且 `beta=False` 时取 `common_old.onnx`；`beta=True` 才取 `common.onnx`；`load_detection_model` 取 `common_det.onnx`。`src\ocr_helper.py` 只调 `DdddOcr(show_ad=False)` → 后两个模型在运行路径上永不加载。
+2. 字符集**内联**在 `ddddocr\models\charset_manager.py::_get_old_charset`，全包无任何模块 `import charsets`（`charsets.py` 为死代码）→ 精确收集不需要额外字符集数据文件。
+3. `ddddocr` 包内不含 `importlib` / `__import__` / `import_module`，全部静态 `from ... import`；运行时唯一读盘依赖是 `models\model_loader.py` 用 `__file__` 推导出的模型目录 → 只补 `common_old.onnx` 即完整。
+4. `pefile` 静态解析 `cv2\cv2.pyd` 的 PE 导入表：依赖为 ADVAPI32 / COMDLG32 / GDI32 / KERNEL32 / MF / MFPlat / MFReadWrite / OLEAUT32 / SHLWAPI / USER32 / d3d11 / dxgi / ole32 / python3，**不含 ffmpeg DLL**。`opencv_videoio_ffmpeg500_64.dll` 只在运行时由 videoio 动态加载，故排除不造成导入期缺失。
+5. ffmpeg DLL 进入包的唯一途径是 `_pyinstaller_hooks_contrib\stdhooks\hook-cv2.py` 的 `collect_dynamic_libs('cv2')`；`--collect-binaries cv2` 在 spec 中展开为同一调用，因此**必须同时**去掉该参数并用 `--additional-hooks-dir` 覆盖 hook（用户 hook 优先级 1000 > contrib -1000，见 `PyInstaller\building\build_main.py`）。
+6. `--collect-all X` 默认 `include_py_files=True`；旧 full 清单中 ddddocr 相关 82 行，含 `api\*.py`、`logo.png`、`README.md`、`charsets.py` 与 `ddddocr-1.6.1.dist-info\*` —— 确认「全量收集」并非只收模型。
+
+**静态验收命令与结果**
+
+| 检查 | 命令 | 结果 |
+| --- | --- | --- |
+| 空白错误 | `git diff --check` | 无输出（无空白错误） |
+| 改动范围 | `git status --short` | `M scripts/build.ps1`、`?? scripts/check-bundle.ps1`、`?? scripts/hooks/`、`?? docs/20261013-size-reduction-plan.md`；未动 `src\` |
+| 脚本语法 | `[Parser]::ParseFile`（主机 7.6.6 与 Windows 宿主 5.1 各一次） | `build.ps1` tokens=617 PASS；`check-bundle.ps1` tokens=1109 PASS（两种宿主结论一致） |
+| Python 语法 | `ast.parse`（不导入、不执行） | `hook-cv2.py` PASS；顶层语句 20；hook 变量赋值 `binaries/datas/hiddenimports/excludedimports/module_collection_mode` 齐备 |
+| CLI 参数存在性 | 在 PyInstaller 6.22.3 `building/makespec.py` 中检索 | `--add-data`(240) `--hidden-import`(268) `--copy-metadata`(311) `--additional-hooks-dir`(328) 均存在 |
+| TOC 断言（旧 full 清单） | `check-bundle.ps1 -Target full -TocPath <备份>\manifests\PKG-00.toc.full` | 解析 1442 条；4 类违规全部命中 → 退出码 1（证明断言有效） |
+| TOC 断言（现有 lite 清单） | `check-bundle.ps1 -Target lite` | 解析 1012 条；`ddddocr/*`、`cv2/*`、`onnxruntime/*` 均 0 项 → 退出码 0 |
+| 解析覆盖率 | `temp\scratch\toc-coverage.py` | 1419 目的名行 + 23 单行式 = 1442 全部配对，0 条孤儿类型标记 |
+| 编码与行尾 | 读取前 3 字节 + CRLF 计数 | `.ps1` BOM=True、CRLF 全量；`hook-cv2.py` BOM=False、CRLF 全量；无裸 LF |
+| 备份完整性 | `Get-FileHash` + 体积 | 见 `temp\output\backup-20261013\GUIT-net-login-size-reduction\BASELINE-MANIFEST.md` |
+
+旧 full 清单被命中的违规项：`ddddocr/common.onnx`、`ddddocr/common_det.onnx`、`cv2/opencv_videoio_ffmpeg500_64.dll`、`ddddocr/api/*`（7 个文件）。
+
+**验收中发现并修复的问题**
+
+| 级别 | 问题 | 处置 |
+| --- | --- | --- |
+| 阻断 | `check-bundle.ps1` 首版用一条大正则枚举类型标记 `DATA/BINARY/EXTENSION/OPTION/PYMODULE/SOURCE`，实测 TOC 还含 **`PYSOURCE`**（full 6 条），且存在 23 条「目标名与类型同行」的单行式条目 → 这些条目被静默跳过，断言可能失效 | 改为逐行解析（三行式 + 单行式两种形态，类型标记按 `[A-Z][A-Z0-9_-]*` 通配）；复验解析 1442/1442，覆盖率 100% |
+| 阻断 | 首版 `Write-Host ("...{0}..." -f )` 缺右操作数，两种宿主均报语法错误 | 解析器检出后修复（补 `$Target`） |
+| 提示 | 路径反转义写作 `-replace '\\\\','\'` 放在哈希表字面量内被解析器拒绝 | 改为 `$dest.Replace('\\','/')`，语义更直白 |
+
+**未验证事项（本次明确未做，属动态检查，需另行批准）**
+
+- 未构建：新的收集规则尚未产生实际 TOC，`check-bundle.ps1` 对**新**清单的通过情形尚未验证（仅用旧清单证明了「能拦住违规」）。
+- 未做离线 OCR 对比、GUI 冒烟、无 Python 环境实测；TOC 校验只能证明收集内容，不能证明运行成功。
+- 预期收益仅为估算：三项闲置资源原始体积合计 100.22 MiB（`common.onnx` 51.58 + `common_det.onnx` 19.19 + ffmpeg 29.45）；exe 为已压缩单文件，实际缩减量必须构建后实测。
+- `README.md` 第 11 行与 `.github/workflows/release.yml` 第 108 行的发布说明仍写「约 160 MB」，属构建后才可更新的陈旧信息，本次未改。
+- CI 触发条件包含 `scripts/**`：**一旦提交并推送即会自动加版本号并发布 Release**，故本次改动保持未提交状态。
+
+**回滚点**
+
+备份目录 `D:\Dev\temp\output\backup-20261013\GUIT-net-login-size-reduction\`：`files\`（`build.ps1` / `ocr_helper.py` / `requirements.txt`）、`manifests\`（两份 spec + 旧 `PKG-00.toc.full`）、`artifacts\`（旧 full 160.42 MiB、lite 19.41 MiB exe）、`BASELINE-MANIFEST.md`（含全部 SHA-256 与 git HEAD `4e30b86`）。回滚＝按清单逐文件覆盖，并删除本次新增的 `scripts\hooks\hook-cv2.py` 与 `scripts\check-bundle.ps1`。
+
+## 2026-10-13 20:20 接手完善阶段 A：许可合规、三层清单检查器、-PythonPath、隔离副本
+
+**授权范围**（用户原话要点）：备份待修改文件、审查并完善已有阶段 A 候选代码、完成静态检查与记录；
+可改构建脚本 / cv2 hook / 清单检查器，可新增只读解析脚本 / 许可文件 / 文档，含 `-PythonPath` 参数。
+只做 A，不改 src / 认证 / 凭据 / 自启 / 依赖版本 / CI / site-packages，不做 B/C。
+**未授权且未执行**：构建、OCR/GUI/测试运行、联网安装、真实门户请求、正式产物替换、提交、发布。
+
+**对交接手册四个问题的处置**
+
+| 问题 | 处置 |
+| --- | --- |
+| 许可 | 确认 `hook-cv2.py` 是 contrib hook（GPL-2.0-or-later）的修改版本：文件头保留上游版权与 SPDX、列明全部修改点；随目录分发 `scripts\hooks\LICENSE`（contrib 2026.8 的 GPL 全文）；`scripts\hooks\README.md` 说明「项目 MIT 与该文件 GPL 聚合并存，不得标为 MIT」 |
+| TOC/PYZ 完整检查 | 新增 `scripts\check_bundle.py`（标准库，`ast.literal_eval`，禁 `eval`/`exec`），同时解析 PKG / PYZ / Analysis 三层；结构或条目形态未知即退出码 2；PKG 与 Analysis 重叠条目去重，避免命中数与体积双计 |
+| FFmpeg 匹配 | 按目标名与源路径 **basename** 匹配 `opencv_videoio_ffmpeg*.dll`，覆盖根目录与任意目录 |
+| 退出码 | 检查器为 Python 原生进程，`build.ps1` 以 `& $Python …` 启动并立即读 `$LASTEXITCODE`（0/1/2）；不再依赖 `.ps1` 内 `exit` 的传播 |
+
+**改动**
+
+| 文件 | 状态 | 字节 | SHA-256 |
+| --- | --- | ---: | --- |
+| `scripts\build.ps1` | 修改 | 10248 | `24F602404051BE19844F962534FD091F935EBA509E492092272A3C4B251D0043` |
+| `scripts\check_bundle.py` | 新增 | 29093 | `8391AFA59E10BAF3AEEE113A2F4DA2F77A465DB45AAACDAB2CD857A280F5930F` |
+| `scripts\hooks\hook-cv2.py` | 修改 | 9906 | `E239A288149087071E2A1FAF8570EDA61D884FC4DF39322415AA1BEC039C5353` |
+| `scripts\hooks\LICENSE` | 新增 | 27666 | `91D0BAAFF00773038E72C0A1FC9D5D2D38706B7A2B9C04F34296608F931B9CD0` |
+| `scripts\hooks\README.md` | 新增 | 4395 | `9BDFC073429B61D6D69F26F55E000D25DAD2B0C48A0D2853A608CEA773A8B926` |
+| `scripts\check-bundle.ps1` | 删除 | — | 过渡实现，被 `check_bundle.py` 取代（备份留档） |
+| `docs\size-reduction-results.md` | 新增 | — | 阶段 A 结果报告与授权申请 |
+
+`build.ps1` 同时：新增 `-PythonPath`（隔离副本没有自己的 .venv；site-packages 用
+`sysconfig` 从所选解释器定位，而不是写死项目 `.venv` 路径）；修正 .DESCRIPTION 中
+「lite 排除 PIL」的错误注释（PIL/pystray 是界面能力，必须保留）。
+
+**隔离副本与备份**
+
+| 路径 | 内容 |
+| --- | --- |
+| `temp\output\GUIT-net-login-size-reduction-20261013-2004\baseline\` | 同源码基线（压缩前收集规则 + `-PythonPath`） |
+| `temp\output\GUIT-net-login-size-reduction-20261013-2004\candidate\` | 候选（本阶段新实现） |
+| `…\fixtures\`、`…\fixtures-venv\`、`…\logs\` | 检查器自检样例与全部校验输出 |
+| `temp\output\backup-20261013\GUIT-net-login-size-reduction-20261013-2004\` | 修改前的三份脚本、三份文档、full/lite 的 PKG/PYZ/Analysis/EXE-00.toc 与 spec |
+
+两副本 `src\*.py` 与原件哈希逐一一致；未复制真实 config.json、venv、.git。
+
+**静态验收（全部只读）**
+
+| 检查 | 结果 |
+| --- | --- |
+| `ast.parse`（repo 与 candidate 的 `check_bundle.py`、`hook-cv2.py`，不导入不执行） | 4/4 PASS |
+| `[Parser]::ParseFile`（repo / baseline / candidate 三份 `build.ps1`，主机 7.6.6 与 Windows 宿主 5.1） | 6/6 PASS（tokens 770 / 499 / 770） |
+| 检查器自检 `--selftest`（8 个合成样例：full 合规 / 6 类违规 / 缺模型 / lite 合规 / lite 误收 / 结构未知 / 字面量损坏 / 缺 PYZ） | 8/8 退出码符合预期，自检退出码 0（managed 与 venv 两个解释器各跑一次） |
+| 旧 full 清单 `--target full` | 退出码 1，6 类违规命中：两个闲置模型、ffmpeg（basename 匹配）、`ddddocr/api/` 资源 7 项、PYZ 模块 `ddddocr.api` + 6 个子模块 |
+| 旧 lite 清单 `--target lite` | 退出码 0，OCR 三类资源与模块均 0 项 |
+| 损坏输入三样例 | 退出码均为 2 |
+| `git diff --check` | 无输出 |
+| 编码与行尾（9 个文件） | `.ps1` UTF-8 BOM+CRLF；`.py`/`.md` 无 BOM+CRLF；无裸 LF |
+| 范围 | `git diff --stat -- src requirements.txt .github` 为空；模型 `common_old.onnx` 13,606,051 字节 / SHA-256 `B8F2AD9C…BF68` 未变 |
+
+**验收中发现并修复**
+
+| 级别 | 问题 | 处置 |
+| --- | --- | --- |
+| 阻断 | 检查器首版把 PKG 与 Analysis 的 datas/binaries 直接合并，重叠条目导致违规命中数翻倍、体积小结双计 | 按 (目标名， 类型) 去重；复验合并后 1442 条与 PKG 完全一致 |
+| 提示 | 自检样例最初用 `\\` 写路径，与真实清单的单反斜杠不符 | 改为原始字符串，样例与真实格式一致 |
+
+**遗留与申请**
+
+- 旧 full 清单被检出的 6 类违规，说明**若不改造**会把闲置模型、FFmpeg 与未使用的
+  `ddddocr.api`（资源 + PYZ 模块）打进 exe；候选规则即针对这些项。
+- candidate 的 TOC/PYZ 尚不存在（未构建），其清单**尚未通过**检查器。
+- exe 实际缩减字节数未测（100.22 MiB 为原始资源体积，不可按比例折算）。
+- 离线 OCR 对比缺固定样本（仓库与 temp 仅 3 张截图，非样本集）：需用户提供 ≥100 张 PNG
+  或另行授权采集；缺样本时该项记「未验证」。
+- 构建/离线验收的命令、副作用、回滚已写在 `docs\size-reduction-results.md` 第 7、9 节，
+  等待一次性授权。
+
+## 2026-10-13 20:45 获批执行隔离构建与离线 OCR 等价对比（阶段 A 动态验收）
+
+**授权**：用户以「继续」批准第 7 节申请；随后再次确认「构建」。**未授权且未执行**：
+GUI 冒烟、无 Python 环境实测、正式产物替换、提交、发布。
+
+**执行与退出码**
+
+| 步骤 | 退出码 | 说明 |
+| --- | ---: | --- |
+| 基线构建 lite+full（压缩前规则） | 0 | `logs\build-baseline.log` |
+| 候选构建 lite+full（阶段 A 规则，内嵌清单检查通过才允许结束） | 0（首跑 1，已修复） | `logs\build-candidate.log` |
+| 四份产物清单校验 | baseline full **1**（6 类违规，符合预期）/ 其余 **0** | `logs\check-*.log`、`check-*.json` |
+| 诊断包构建 ×2（baseline / candidate 规则） | 0（首跑 1，已修复） | `logs\build-diag.log` |
+| 诊断包运行 ×2（120 张固定样本） | 0 / 0 | `logs\ocr-diag-*.json` |
+
+**实测体积（同源码同环境）**
+
+| 产物 | 字节 | MiB | SHA-256 |
+| --- | ---: | ---: | --- |
+| baseline full | 168,215,822 | 160.42 | `36EDA7ED599BE7DF2F56ECB8248118284EB48510A82BBC5CA255744372653B1F` |
+| candidate full | **86,039,734** | **82.05** | `E4366A5B643D5EBBA13754207A6B6FBFDFBD2EAA5A9AECE198F7FAABFC7BE711` |
+| baseline lite | 20,357,535 | 19.41 | `EEA48A8BF98555A69141CAEA446BD35F933A144AAB881AE31EF47B96213EBD56` |
+| candidate lite | 20,357,657 | 19.41 | `C4BBE4C1A85BB793C572114C0B9F9E26833EDF33C12A2C89DD846BE393EB4192` |
+
+- **full 缩减 82,176,088 字节 = 78.37 MiB = −48.85%**；120 MiB 目标达成。
+- lite +122 字节（构建参数未变）；PKG 条目集合 **1012 = 1012 逐条一致**。
+- baseline full 与历史 full 仅差 121 字节 → 同源码重建可复现。
+- 产物只在 runRoot（`D:\Dev\temp\output\GUIT-net-login-size-reduction-20261013-2004\`），
+  仓库 `build\` 未动，正式产物未替换。
+
+**离线 OCR 等价对比（120 张固定合成样本，种子 20261013）**
+
+把同一诊断入口分别按 baseline / candidate 收集规则打包为 `--console` 诊断 exe
+（复用同一 `OcrEngine` 封装与模型规则；诊断包通过不替代正式 exe 冒烟），各自运行：
+
+| 指标 | baseline 规则 | candidate 规则 |
+| --- | --- | --- |
+| exe 字节 | 163,785,693 | 81,594,221 |
+| `frozen` / `ddddocr_available` / `OcrEngine.available()` | True / True / True | True / True / True |
+| 包内模型 SHA-256 | `B8F2AD9C…BF68` | `B8F2AD9C…BF68` |
+| 运行错误 | 0 | 0 |
+| 120 张原始输出 + 包装输出 | — | **逐张一致，差异 0** |
+
+结论：候选打包环境 OCR 可用（排除静默降级），移除两个闲置模型、FFmpeg 组件与
+`ddddocr.api` 未改变任何识别输出。样本为合成 PNG（种子固定可复现），不代表真实验证码
+分布，不用于准确率结论；包装输出恰 4 位 105/120。
+
+**过程中发现并修复**
+
+| 级别 | 问题 | 处置 |
+| --- | --- | --- |
+| 阻断 | 候选构建首跑 exit=1：`sysconfig` 探测的内嵌双引号被 Windows 宿主 5.1 剥掉，Python 收到 `get_paths()[purelib]` → NameError | 改为只用 Python 单引号并注释原因；在 5.1 宿主下验证探测返回正确路径后重跑成功 |
+| 阻断 | `tools\build-diag.ps1` 首跑解析失败：含中文未写 UTF-8 BOM，5.1 按 ANSI 读取吞掉引号（AGENTS 第 2 节的坑） | 补 BOM + CRLF 后通过 |
+
+**交接第 9 节通过条件核对**：除 GUI 冒烟与无 Python 环境实测外全部满足；
+候选可进入正式 exe 冒烟与分发评估。详细数据见 `docs\size-reduction-results.md`。
+
+## 2026-10-13 21:07 GUI 冒烟通过、正式产物替换、README 体积同步（用户授权「一口气做完」）
+
+**GUI 冒烟（隔离模拟副本，无真实门户请求）**
+
+模拟目录 `<runRoot>\gui-smoke\{full,lite}\`：候选 exe + 把 portalUrl / portalHome / captchaUrl /
+submitUrl / logoffUrl / onlineProbe.url 全部指向 `http://127.0.0.1:9` 的 config.json，
+user 字段留空、`options.autoConnect=false` → 不发出真实门户请求、不尝试登录；未改 src。
+
+| 项 | full | lite |
+| --- | --- | --- |
+| 主窗口标题 | 联网设置 v1.0.0 | 联网设置 v1.0.0 |
+| 进程（启动器+工作子进程） | 2，稳定 20s | 2，稳定 20s |
+| 单实例端口 47823 监听 | True | True |
+| 脚本退出码 | 0 | 0 |
+
+实现说明：onefile 产物是「启动器父进程 + 工作子进程」两层，窗口在子进程上——首版脚本按
+启动返回的 PID 查 MainWindowTitle 恒为空而误报失败，已改为按进程名枚举全部同名进程。
+
+**正式产物替换与文档同步**
+
+- `build\GUIT-net-login-{full,lite}.exe` 替换为 candidate 产物（逐字节一致，full SHA-256
+  前缀 `E4366A5B`）；旧产物备份在两处 backup 目录，`build\` 在 .gitignore 内。
+- `README.md` 体积表「约 160 MB」→「约 82 MB」；`release.yml` 内的发布说明文案按授权边界
+  未改，需发版前人工同步。
+
+**提交**：已本地提交（见下），**未推送**——`scripts/**` 推送会触发 release.yml 自动加版本
+号并发布 Release，是否推送由用户决定。
