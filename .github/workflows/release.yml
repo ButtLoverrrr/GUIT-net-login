@@ -89,19 +89,29 @@ jobs:
 
       - name: 构建 lite 与 full
         shell: pwsh
-        run: |
-          & ./scripts/build.ps1 -Target all 2>&1 | Tee-Object -FilePath build-log.txt
-          if (-not $?) { exit 1 }
+        run: ./scripts/build.ps1 -Target all *> build-log.txt; if (-not $?) { exit 1 }
 
-      - name: 构建失败时输出日志尾部（诊断用）
+      - name: 构建失败时输出日志诊断（注解 + 完整日志 artifact）
         if: failure()
         shell: pwsh
         run: |
           if (Test-Path build-log.txt) {
-            Get-Content build-log.txt -Tail 60 | ForEach-Object { "::error::$_" }
+            $errs = Select-String -Path build-log.txt -Pattern '::error::|ERROR:|Traceback|Exception|throw' | Select-Object -First 12
+            foreach ($e in $errs) { "::error::" + $e.Line.Trim() }
+            $tail = Get-Content build-log.txt -Tail 30
+            "::error::---- build-log.txt 最后 30 行 ----"
+            foreach ($l in $tail) { "::error::$l" }
           } else {
             "::error::未找到 build-log.txt"
           }
+
+      - name: 上传构建日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build-log.txt
+          retention-days: 3
 
       - name: 生成发布说明
         shell: pwsh

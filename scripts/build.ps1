@@ -46,6 +46,19 @@ param(
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
+# CI 诊断：任何终止性错误都转成 GitHub 注解（::error:: 仅在 CI 环境生效，本地正常打印）。
+# 这样即使 CI 日志被管道缓冲/截断，真实错误也能出现在 check-run 注解里。
+trap {
+    $errLines = ($_ | Out-String) -split "`r?`n" | Where-Object { $_.Trim() }
+    if ($env:GITHUB_ACTIONS -eq 'true') {
+        foreach ($line in $errLines) { Write-Host "::error::$line" }
+    }
+    else {
+        foreach ($line in $errLines) { Write-Host $line -ForegroundColor Red }
+    }
+    break
+}
+
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $SourceDir   = Join-Path $ProjectRoot 'src'
 $EntryPoint  = Join-Path $SourceDir 'app.py'
