@@ -99,9 +99,15 @@ class PortalClient:
 
     # -------------------------------------------------------------- 在线探测
     def is_online(self) -> bool:
-        """探测外网可达性；校验响应内容，避免门户劫持重定向造成误判。"""
+        """探测外网可达性；校验响应内容，避免门户劫持重定向造成误判。
+
+        必须用 **HTTPS**：HTTP 明文探测在校园网未认证状态下会被门户劫持或
+        特殊处理，实测曾导致离线时误判为在线（用户网页注销后程序仍认为
+        已联网）。HTTPS 无法被透明伪造——离线时 TLS 握手必然失败，
+        这里会因异常而正确返回 False。
+        """
         probe = self.cfg.get("onlineProbe") or {}
-        url = probe.get("url", "http://www.msftconnecttest.com/connecttest.txt")
+        url = probe.get("url", "https://www.msftconnecttest.com/connecttest.txt")
         expect = probe.get("expect", "Microsoft Connect Test")
         timeout = int(probe.get("timeout", 4) or 4)
         try:
