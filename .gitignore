@@ -32,7 +32,7 @@ config.json
 *.user
 *.suo
 
-# 大体积产物（>500 MB 不入库，放 D:\Dev\temp\output\）
+# 大体积产物（>500 MB 不入库，放本机临时输出目录）
 *.iso
 *.vmdk
 *.pdb

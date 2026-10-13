@@ -27,7 +27,7 @@
   - 开发环境：Python 3.13.16（含 tkinter，官方安装包自带）
 - 事实结论（读到的证据，不凭记忆）：
   - 开发所用 Python 的 tkinter 组件**齐全**：`DLLs\_tkinter.pyd`、`tcl86t.dll`、`tk86t.dll`、`zlib1.dll`、`tcl\{tcl8.6,tk8.6}`、`Lib\tkinter\`、`Scripts\pip.exe` 均在 → **做 GUI 无需再安装任何运行时**。
-  - 本机**无 MSVC**：`C:\Program Files*\Microsoft Visual Studio\*` 目录与 `vswhere.exe` 均不存在，`upx` 也不存在 → **Nuitka 路线不可行**（它需要 C 编译器）。
+  - 本机**无 MSVC**：Visual Studio 安装目录与 `vswhere.exe` 均不存在，`upx` 也不存在 → **Nuitka 路线不可行**（它需要 C 编译器）。
   - 目标门户 `http://10.6.6.6/login` 结构（本会话已实测，非推测）：ASP.NET WebForms；`POST /login` 必须携带隐藏字段 `__VIEWSTATE` / `__VIEWSTATEGENERATOR` / `__VIEWSTATEENCRYPTED` / `__EVENTVALIDATION`；表单项为 `ctl00$MainContent$SSOGUITID`（学工号）、`SSOACC`（上网账号）、`SSOPWD`（密码）、`TextBoxCC`（4 位验证码）、`LoginBtn`（提交）；验证码来自 `GET /CheckCode`（PNG，约 1 KB），与 `ASP.NET_SessionId` 绑定；登录失败时返回登录页本身（含验证码输入框）与 `validation-summary-errors` 错误文本。
   - 本机**系统代理** `127.0.0.1:54819`（注册表级）会拦截 pip 的索引请求（实测返回 403 / 空页面），仅 `unset` 环境变量无效 → 装依赖必须显式绕过（`NO_PROXY=*` 或直连）。
   - 既有 `campus-net-autologin` 的流程设计可借鉴：登录遵循「探测在线 → 抓页面 → POST → 复检」四步，幂等（已在线即退出）。其代码为 PowerShell，本项目不复用代码，但沿用该流程与幂等原则。
