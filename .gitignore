@@ -1,0 +1,42 @@
+# 构建产物
+build/
+dist/
+out/
+bin/
+obj/
+
+# 依赖
+node_modules/
+vendor/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# 临时与日志
+temp/
+*.log
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
+
+# 运行日志（可能含 IP 与账号痕迹）
+logs/
+
+# 本地配置与凭据：含明文账号密码，严禁入库（只提交 config.sample.json）
+config/config.json
+config/*.local.json
+
+# 编辑器与 IDE
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+
+# 大体积产物（>500 MB 不入库，放 D:\Dev\temp\output\）
+*.iso
+*.vmdk
+*.pdb

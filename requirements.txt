@@ -1,0 +1,12 @@
+# 运行时依赖（锁版本；Python 3.13.16 / Windows x64）
+# 验证码识别（OCR 自动识别 + 手输兜底）
+ddddocr==1.6.1
+
+# 打包工具（仅构建期需要，运行时不需要）
+pyinstaller==6.22.3
+
+# 以下为 ddddocr 的运行时依赖，装 ddddocr 时会自动拉取，此处显式锁定便于离线复现
+numpy==2.5.4
+onnxruntime==1.31.0
+pillow==12.3.0
+opencv-python==5.0.0.93

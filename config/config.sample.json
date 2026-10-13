@@ -1,0 +1,42 @@
+{
+  "portalUrl": "http://10.6.6.6/login",
+  "portalHome": "http://10.6.6.6",
+  "captchaUrl": "http://10.6.6.6/CheckCode",
+  "submitUrl": "http://10.6.6.6/login",
+  "logoffUrl": "http://10.6.6.6/logoff",
+  "fields": {
+    "guid": "ctl00$MainContent$SSOGUITID",
+    "acc": "ctl00$MainContent$SSOACC",
+    "pwd": "ctl00$MainContent$SSOPWD",
+    "captcha": "ctl00$MainContent$TextBoxCC",
+    "submit": "ctl00$MainContent$LoginBtn"
+  },
+  "submitValue": "登录",
+  "logoffFields": {
+    "captcha": "ctl00$MainContent$TextBoxCC",
+    "submit": "ctl00$MainContent$LogoffBtn",
+    "submitValue": "注销"
+  },
+  "statusFields": {
+    "ip": "MainContent_LocalIP",
+    "online": "MainContent_LabelOnline"
+  },
+  "user": {
+    "_comment": "guid=学号（门户 SSOGUITID）；acc=上网账号/手机号（门户 SSOACC，认证用，必填）；pwd=上网密码",
+    "guid": "",
+    "acc": "",
+    "pwd": ""
+  },
+  "options": {
+    "remember": true,
+    "autostart": false,
+    "useOcr": true,
+    "autoConnect": true
+  },
+  "maxCaptchaRetry": 3,
+  "onlineProbe": {
+    "url": "http://www.msftconnecttest.com/connecttest.txt",
+    "expect": "Microsoft Connect Test",
+    "timeout": 4
+  }
+}

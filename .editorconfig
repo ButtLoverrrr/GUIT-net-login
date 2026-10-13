@@ -1,0 +1,31 @@
+# 项目统一编辑器配置
+# charset = utf-8 表示 UTF-8 无 BOM；需要 BOM 请显式写 utf-8-bom
+root = true
+
+[*]
+charset = utf-8
+end_of_line = crlf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{js,jsx,ts,tsx,json,jsonc,yml,yaml,md,markdown,css,scss,html,htm,vue,xml,csv}]
+indent_size = 2
+
+[*.{go,rs,py,pyi,java,kt,kts,c,h,cpp,hpp,cs}]
+indent_size = 4
+
+[*.{sh,bash,zsh}]
+end_of_line = lf
+
+[*.{bat,cmd,ps1,psm1,psd1}]
+end_of_line = crlf
+indent_size = 4
+
+[Makefile]
+indent_style = tab
+
+[*.{png,jpg,jpeg,gif,ico,webp,pdf,zip,7z,gz,exe,dll,bin,so,dylib,woff,woff2,ttf}]
+insert_final_newline = false
+trim_trailing_whitespace = false

@@ -1,0 +1,43 @@
+# 文本规范化：文本按 CRLF 检出（Windows），Shell 脚本保持 LF
+* text=auto
+
+*.sh    text eol=lf
+*.bash  text eol=lf
+*.zsh   text eol=lf
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+*.psm1  text eol=crlf
+*.psd1  text eol=crlf
+
+*.md       text
+*.txt      text
+*.json     text
+*.yml      text
+*.yaml     text
+*.csv      text
+*.sql      text
+
+*.png      binary
+*.jpg      binary
+*.jpeg     binary
+*.gif      binary
+*.webp     binary
+*.ico      binary
+*.pdf      binary
+*.zip      binary
+*.7z       binary
+*.gz       binary
+*.exe      binary
+*.dll      binary
+*.so       binary
+*.dylib    binary
+*.bin      binary
+*.ttf      binary
+*.woff     binary
+*.woff2    binary
+*.xlsx     binary
+*.docx     binary
+*.pptx     binary
+
+*.md       diff=markdown
