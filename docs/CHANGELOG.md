@@ -30,7 +30,14 @@
 | 残留引用 | `grep -rn "log_dir\|logs/" src\*.py` | 无 |
 | 删除逻辑接入 | `grep -n remove_config src\app.py` | 已接入 `_save_config_safely()` |
 | 目录结构 | 列出项目根 | 无 `logs\`、无 `config\`，仅 `config.sample.json` |
-| 打包 | `build.ps1 -Target all` | 见下方 |
+| 打包 | `build.ps1 -Target all` | `CampusNetLogin-lite.exe` 11.0 MB、`CampusNetLogin-full.exe` 158.2 MB |
+| **运行零残留实测** | 运行 full 版 30 秒后检查程序目录 | **无 `logs\` 目录、无 `config.json`**（未点「连接」时不产生任何文件） |
+
+**问题与处置**
+
+| 级别 | 问题 | 处置 |
+| --- | --- | --- |
+| 提示 | full 构建中断：`[safe-delete] ... trash-failed`——本机沙箱的删除保护层（`genie-trash`）无法回收 165 MB 的旧 exe，导致 PyInstaller 覆盖同名文件失败 | 重新触发删除（最终生效）后重新构建即通过。与项目代码无关，属本地环境行为；已记录的规避办法是构建前确保 `build\` 中无同名旧产物 |
 
 ## 2026-10-13 13:54 界面显示项目地址
 
