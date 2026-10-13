@@ -43,7 +43,8 @@ jobs:
       - name: 安装 Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          # 与 requirements.txt 锁定版本对应（numpy 2.5.x 需要 3.12+）
+          python-version: "3.13"
 
       - name: 计算下一个版本号
         id: ver
