@@ -38,6 +38,8 @@ DPI_AWARE = True
 WM_CLOSE = 0x0010
 # 验证码显示放大倍数：门户原图约 155x52，放大后手输时更易辨认
 CAPTCHA_ZOOM = 2
+# 项目主页（界面上显示并可点击打开）
+PROJECT_URL = "https://github.com/ButtLoverrrr/GUIT-net-login"
 # 免责声明：明确工具定位，避免被误解为破解/绕过工具
 DISCLAIMER = (
     "免责声明：本工具仅为个人便利性网络连接工具，不修改、不破解、不绕过校园网认证与计费机制；"
@@ -219,11 +221,23 @@ class LoginApp:
         self.txt_log.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
 
+        # 项目地址（可点击打开）
+        repo_row = tk.Frame(frame)
+        repo_row.grid(row=11, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        tk.Label(repo_row, text="项目地址：", font=("Microsoft YaHei UI", 7),
+                 fg="#8a99aa").pack(side="left")
+        repo_link = tk.Label(
+            repo_row, text=PROJECT_URL, font=("Microsoft YaHei UI", 7, "underline"),
+            fg="#3b82d9", cursor="hand2",
+        )
+        repo_link.pack(side="left")
+        repo_link.bind("<Button-1>", lambda _e: self._open_url(PROJECT_URL, "项目主页"))
+
         # 免责声明
         tk.Label(
             frame, text=DISCLAIMER, font=("Microsoft YaHei UI", 7), fg="#8a99aa",
             wraplength=372, justify="left", anchor="w",
-        ).grid(row=11, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+        ).grid(row=12, column=0, columnspan=3, sticky="ew", pady=(4, 0))
 
     # ------------------------------------------------------------ 启动与轮询
     def _on_start(self) -> None:
@@ -328,14 +342,19 @@ class LoginApp:
     def _on_quit(self) -> None:
         self.root.destroy()
 
-    def _open_portal(self) -> None:
-        """用系统默认浏览器打开官方网络接入平台主页（10.6.6.6）。"""
-        url = (self.cfg.get("portalHome") or "http://10.6.6.6").strip()
+    def _open_url(self, url: str, label: str = "") -> None:
+        """用系统默认浏览器打开链接。"""
         try:
             webbrowser.open(url)
-            self._append_log("已在浏览器打开官方平台：%s" % url)
+            self._append_log("已在浏览器打开%s：%s" % (label or "链接", url))
         except Exception as exc:
-            self._append_log("打开官方平台失败：%s" % exc)
+            self._append_log("打开链接失败：%s" % exc)
+
+    def _open_portal(self) -> None:
+        """打开官方网络接入平台主页（10.6.6.6）。"""
+        self._open_url(
+            (self.cfg.get("portalHome") or "http://10.6.6.6").strip(), "官方平台"
+        )
 
     # ------------------------------------------------------------ 表单与配置
     def _collect_form(self) -> bool:
