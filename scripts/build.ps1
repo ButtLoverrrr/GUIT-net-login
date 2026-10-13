@@ -44,6 +44,9 @@ function Build-One {
         # 显式把 src 加入模块搜索路径：app.py 里的 `from version import __version__`
         # 依赖它才能被打进单文件包（否则运行时报 No module named 'version'）
         '--paths', $SourceDir,
+        # pystray 的平台后端与 Pillow 的 tkinter 桥接是动态/隐式导入，显式声明避免漏收
+        '--hidden-import', 'pystray._win32',
+        '--hidden-import', 'PIL.ImageTk',
         '--distpath', $DistDir,
         '--workpath', (Join-Path $DistDir "_work\$Name"),
         '--specpath', $DistDir,
@@ -58,12 +61,13 @@ function Build-One {
         )
     }
     else {
+        # lite：去掉 OCR 相关（体积大头），但 **必须保留 PIL 与 pystray**——
+        # 两者是界面基础能力（验证码图片解码、隐藏到系统托盘）。
         $pyiArgs += @(
             '--exclude-module', 'ddddocr',
             '--exclude-module', 'onnxruntime',
             '--exclude-module', 'cv2',
             '--exclude-module', 'numpy',
-            '--exclude-module', 'PIL',
             '--exclude-module', 'sympy',
             '--exclude-module', 'matplotlib'
         )

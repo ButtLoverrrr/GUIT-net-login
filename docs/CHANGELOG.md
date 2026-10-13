@@ -8,6 +8,30 @@
 | 2026-10-13 12:16 | 编写 `docs\PLAN.md`（需求澄清 6 项、现状核对 6 条事实、选型 9 候选评估、步骤 9 步、风险 5 项、静态验收 5 条） | `docs\PLAN.md` | 待用户确认方案 | 无（文件为纯新增） |
 | 2026-10-13 12:17 | 编写 `README.md`（占位，待实现后补运行方式） | `README.md` | 未验证 | 无（文件为纯新增） |
 
+## 2026-10-13 15:00 验证码显示改用 Pillow；「隐藏」改为隐藏到系统托盘
+
+**改动**（用户反馈：验证码又显示「加载失败」；希望隐藏到托盘、任务栏不留窗口）
+
+1. **验证码显示改用 Pillow 解码**（`_show_captcha()`）：
+   - 优先 `PIL.Image` 解码 + `LANCZOS` 平滑放大 2 倍，再用 `ImageTk.PhotoImage` 显示；Pillow 不可用时退回 tkinter 原生 `PhotoImage.zoom()`。
+   - 原因：tkinter 原生 PNG 解码对非标准 chunk 较为严格，门户验证码可能触发解析失败；Pillow 容错更好。
+   - 失败时不再只显示「加载失败」，而是把**具体异常写入界面日志**，便于定位。
+2. **「隐藏」按钮改为隐藏到系统托盘**（`_on_hide()`）：使用 `pystray` 创建托盘图标（Pillow 绘制的蓝色圆角底 + 白色信号图形），窗口 `withdraw()` 后**任务栏与窗口均不残留**；托盘菜单提供「显示窗口」（双击图标亦可）与「退出」；托盘回调切回主线程操作界面。
+3. `requirements.txt` 新增 `pystray==0.19.5`。
+4. `scripts\build.ps1`：
+   - lite 版**不再排除 PIL**（与 pystray 同为界面基础能力，必须保留），相应体积由约 11 MB 增至约 18 MB；
+   - 新增 `--hidden-import pystray._win32` 与 `--hidden-import PIL.ImageTk`，避免动态/隐式导入被漏收。
+
+**验证**
+
+| 检查 | 方式 | 结果 |
+| --- | --- | --- |
+| 语法 | `py_compile src\*.py` | 通过 |
+| pystray 后端 | 源码级导入 `pystray._win32` | OK；Icon 与菜单（显示窗口 / 退出）创建成功 |
+| 托盘图标 | Pillow 绘制并保存预览 | 生成正常（蓝色圆角底 + 白色信号） |
+| 打包体积 | `build.ps1 -Target all` | lite 18.3 MB（含 Pillow+pystray）、full 159.3 MB |
+| 启动实测 | 运行 lite 并读窗口标题 | 「联网设置 v1.0.0」正常；运行后目录无残留 |
+
 ## 2026-10-13 14:45 修复：打包后 ModuleNotFoundError（分发前实测发现）
 
 **问题**（在回答「可以分发了吗」前对 Release 产物做实测时发现）

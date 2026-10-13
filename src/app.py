@@ -13,6 +13,7 @@
 import argparse
 import base64
 import ctypes
+import io
 import json
 import queue
 import sys
@@ -20,6 +21,22 @@ import threading
 import time
 import tkinter as tk
 import webbrowser
+
+# Pillow：解码验证码图片（比 tkinter 原生解码宽容），并生成托盘图标
+try:
+    from PIL import Image, ImageDraw, ImageTk
+
+    HAS_PIL = True
+except Exception:  # 缺 Pillow 时降级为 tkinter 原生解码
+    HAS_PIL = False
+
+# pystray：把窗口隐藏到系统托盘
+try:
+    import pystray
+
+    HAS_TRAY = True
+except Exception:  # 缺 pystray 时「隐藏」退回最小化
+    HAS_TRAY = False
 
 import autostart
 from app_logger import Logger
@@ -97,6 +114,7 @@ class LoginApp:
         # 日志只进界面，不落盘（见 app_logger 模块说明）
         self.logger.set_sink(lambda line: self.ui_queue.put(("log", line)))
         self.photo = None
+        self.tray_icon = None
         self.captcha_purpose = "login"  # 当前显示的验证码用途：login / logoff
         self._net_online = False
         self._build_ui()
@@ -321,16 +339,32 @@ class LoginApp:
         )
 
     def _show_captcha(self, png: bytes) -> None:
-        """显示验证码；放大 2 倍便于肉眼辨认（门户原图仅 155x52）。
+        """显示验证码并放大（门户原图约 155x52，放大后便于手输）。
 
-        zoom() 走整数倍最近邻放大，不依赖 Pillow，因此 lite 版同样生效。
+        优先用 Pillow 解码：对各式 PNG（灰度、调色板、带透明、非标准 chunk）比
+        tkinter 原生解码宽容得多，放大也更平滑；Pillow 不可用时退回 tkinter 原生。
+        两条路都失败才提示失败，并把具体异常写入日志便于排查。
         """
+        errors = []
+        if HAS_PIL:
+            try:
+                with Image.open(io.BytesIO(png)) as im:
+                    size = (im.width * self.CAPTCHA_ZOOM, im.height * self.CAPTCHA_ZOOM)
+                    big = im.convert("RGB").resize(size, Image.LANCZOS)
+                self.photo = ImageTk.PhotoImage(big)
+                self.lbl_captcha.configure(image=self.photo, text="")
+                return
+            except Exception as exc:
+                errors.append("Pillow: %s" % exc)
         try:
             base = tk.PhotoImage(data=base64.b64encode(png).decode("ascii"))
             self.photo = base.zoom(self.CAPTCHA_ZOOM) if self.CAPTCHA_ZOOM > 1 else base
             self.lbl_captcha.configure(image=self.photo, text="")
-        except Exception:
-            self.lbl_captcha.configure(image="", text="[验证码加载失败]")
+            return
+        except Exception as exc:
+            errors.append("tkinter: %s" % exc)
+        self.lbl_captcha.configure(image="", text="[验证码显示失败]")
+        self.logger.error("验证码显示失败：%s" % "；".join(errors))
 
     def _finish(self, ok: bool, message: str) -> None:
         self._set_busy(False)
@@ -343,10 +377,57 @@ class LoginApp:
             self._set_status(message)
             self._append_log("✘ %s" % message)
 
+    # ------------------------------------------------------------ 托盘
+    def _tray_image(self):
+        """生成托盘图标：蓝色圆角底 + 白色无线信号。"""
+        size = 64
+        img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        draw.rounded_rectangle([1, 1, size - 2, size - 2], radius=14,
+                               fill=(59, 130, 217, 255))
+        cx, cy = size // 2, size - 16
+        for radius in (11, 19, 27):
+            draw.arc([cx - radius, cy - radius, cx + radius, cy + radius],
+                     start=205, end=335, fill="white", width=5)
+        draw.ellipse([cx - 5, cy - 5, cx + 5, cy + 5], fill="white")
+        return img
+
     def _on_hide(self) -> None:
-        self.root.iconify()
+        """隐藏到系统托盘：窗口与任务栏按钮都不留，双击托盘图标可恢复。"""
+        if not HAS_TRAY:
+            self.root.iconify()  # 无 pystray 时退回最小化
+            return
+        self.root.withdraw()
+        if self.tray_icon is None:
+            menu = pystray.Menu(
+                pystray.MenuItem("显示窗口", self._tray_show, default=True),
+                pystray.MenuItem("退出", self._tray_quit),
+            )
+            self.tray_icon = pystray.Icon(
+                "GUIT-net-login", self._tray_image(), "校园网登录", menu
+            )
+            threading.Thread(target=self.tray_icon.run, daemon=True).start()
+            self.logger.info("已隐藏到系统托盘：双击托盘图标可重新显示")
+
+    def _tray_show(self, *_args) -> None:
+        """从托盘恢复窗口（回调运行在托盘线程，须切回主线程操作界面）。"""
+        self.root.after(0, self.root.deiconify)
+
+    def _tray_quit(self, *_args) -> None:
+        """托盘菜单里的退出。"""
+        self._stop_tray()
+        self.root.after(0, self.root.destroy)
+
+    def _stop_tray(self) -> None:
+        if self.tray_icon is not None:
+            try:
+                self.tray_icon.stop()
+            except Exception:
+                pass
+            self.tray_icon = None
 
     def _on_quit(self) -> None:
+        self._stop_tray()
         self.root.destroy()
 
     def _open_url(self, url: str, label: str = "") -> None:
