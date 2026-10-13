@@ -1,18 +1,18 @@
 # -*- coding: utf-8 -*-
-"""配置读写：便携语义 —— 配置始终位于程序所在目录。
+"""配置读写：**单文件、便携语义**。
 
-打包为 exe 后，程序目录即 exe 所在目录，因此 config/config.json 可随 exe
-一起复制到任意机器（符合「portable 软件」的分发要求）。
+配置文件固定为程序同目录下的 `config.json`（不建子目录），仅在用户勾选了
+「记住密码」或「开机自动登录」时才创建；两者都不勾选时该文件会被删除，
+因此程序在不记忆任何信息的情况下不会遗留文件。
 """
 
 import json
 import os
 import sys
 
-CONFIG_DIR_NAME = "config"
 CONFIG_FILE_NAME = "config.json"
 
-# 默认配置：字段名映射按 10.6.6.6 门户（ASP.NET WebForms）实测结构固化，
+# 默认配置：字段名映射按门户（ASP.NET WebForms）实测结构固化，
 # 若门户改版，只需改这里或 config.json，无需改代码。
 DEFAULT_CONFIG = {
     "portalUrl": "http://10.6.6.6/login",
@@ -61,16 +61,9 @@ def app_dir() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def config_dir() -> str:
-    return os.path.join(app_dir(), CONFIG_DIR_NAME)
-
-
 def config_path() -> str:
-    return os.path.join(config_dir(), CONFIG_FILE_NAME)
-
-
-def log_dir() -> str:
-    return os.path.join(app_dir(), "logs")
+    """配置文件路径：程序同目录下的单个 config.json（不建子目录）。"""
+    return os.path.join(app_dir(), CONFIG_FILE_NAME)
 
 
 def _merge(base: dict, override: dict) -> dict:
@@ -88,25 +81,33 @@ def _merge(base: dict, override: dict) -> dict:
 
 def load_config() -> dict:
     """读取配置；文件缺失或损坏时返回默认配置（不抛异常，保证程序能启动）。"""
-    path = config_path()
     try:
-        with open(path, "r", encoding="utf-8") as fp:
+        with open(config_path(), "r", encoding="utf-8") as fp:
             data = json.load(fp)
         if not isinstance(data, dict):
             raise ValueError("配置根节点必须是对象")
         return _merge(DEFAULT_CONFIG, data)
-    except FileNotFoundError:
-        return dict(DEFAULT_CONFIG)
     except Exception:
         return dict(DEFAULT_CONFIG)
 
 
 def save_config(cfg: dict) -> None:
-    """保存配置（UTF-8 无 BOM），目录不存在则创建。"""
-    os.makedirs(config_dir(), exist_ok=True)
+    """保存配置（UTF-8 无 BOM）到程序同目录的 config.json。"""
     with open(config_path(), "w", encoding="utf-8") as fp:
         json.dump(cfg, fp, ensure_ascii=False, indent=2)
         fp.write("\n")
+
+
+def remove_config() -> bool:
+    """删除本地配置文件；返回是否确实删除（用于「不留痕迹」场景）。"""
+    try:
+        path = config_path()
+        if os.path.exists(path):
+            os.remove(path)
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def has_credential(cfg: dict) -> bool:

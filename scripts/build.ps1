@@ -25,7 +25,7 @@ $EntryPoint  = Join-Path $ProjectRoot 'src\app.py'
 # 项目目录改名或移动后会失效，模块方式不受影响。
 $Python      = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
 $DistDir     = Join-Path $ProjectRoot 'build'
-$SampleCfg   = Join-Path $ProjectRoot 'config\config.sample.json'
+$SampleCfg   = Join-Path $ProjectRoot 'config.sample.json'
 
 if (-not (Test-Path $Python)) {
     throw "未找到 $Python；请先创建 .venv 并安装 requirements.txt"

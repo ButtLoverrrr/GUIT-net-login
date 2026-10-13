@@ -23,7 +23,7 @@ import webbrowser
 
 import autostart
 from app_logger import Logger
-from config_store import has_credential, load_config, save_config
+from config_store import has_credential, load_config, remove_config, save_config
 from ocr_helper import OcrEngine
 from portal_client import (
     KIND_CAPTCHA,
@@ -85,11 +85,13 @@ class LoginApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.cfg = load_config()
-        self.logger = Logger("GUI")
         self.ocr = OcrEngine()
         self.session = None
         self.busy = False
         self.ui_queue = queue.Queue()
+        self.logger = Logger("GUI")
+        # 日志只进界面，不落盘（见 app_logger 模块说明）
+        self.logger.set_sink(lambda line: self.ui_queue.put(("log", line)))
         self.photo = None
         self.captcha_purpose = "login"  # 当前显示的验证码用途：login / logoff
         self._net_online = False
@@ -251,7 +253,6 @@ class LoginApp:
         self.var_autostart.set(autostart.is_enabled())
         # OCR 引擎初始化（约 1~2 秒）放在后台预取线程里做，避免界面出现时卡顿
         self.logger.info("程序已启动")
-        self._append_log("程序已启动")
         if not has_credential(self.cfg):
             self._set_status("请先填入学号、上网账号与密码")
             self._append_log("首次使用：请填写账号信息后点击「连接」")
@@ -392,13 +393,24 @@ class LoginApp:
         return True
 
     def _save_config_safely(self) -> None:
+        """按需保存：勾选「记住密码」或「开机自动登录」才落盘，否则删除配置以保持无痕。
+
+        未勾选「记住密码」时口令绝不写入文件。
+        """
+        options = self.cfg.get("options") or {}
+        remember = bool(options.get("remember", True))
+        autostart_on = bool(options.get("autostart", False))
+        if not (remember or autostart_on):
+            if remove_config():
+                self.logger.info("未启用记忆项，已删除本地 config.json")
+            return
         data = json.loads(json.dumps(self.cfg))
-        if not (data.get("options") or {}).get("remember", True):
+        if not remember:
             data.setdefault("user", {})["pwd"] = ""
         try:
             save_config(data)
         except Exception as exc:
-            self._append_log("配置保存失败：%s" % exc)
+            self.logger.error("配置保存失败：%s" % exc)
 
     # ------------------------------------------------------------ 登录流程
     def _ensure_session(self) -> None:
@@ -580,7 +592,6 @@ class LoginApp:
             guess = self.ocr.classify(png) if use_ocr else ""
             engine_state = "可用" if use_ocr else "不可用（仅手输）"
             self.logger.info("验证码已获取；OCR 引擎 %s" % engine_state)
-            self._post("log", "验证码已获取；OCR 引擎 %s" % engine_state)
             self._post("captcha", png, guess)
             self.captcha_purpose = "login"
             # 顺带查询门户侧连接状态（IP + 是否在线）

@@ -8,6 +8,30 @@
 | 2026-10-13 12:16 | 编写 `docs\PLAN.md`（需求澄清 6 项、现状核对 6 条事实、选型 9 候选评估、步骤 9 步、风险 5 项、静态验收 5 条） | `docs\PLAN.md` | 待用户确认方案 | 无（文件为纯新增） |
 | 2026-10-13 12:17 | 编写 `README.md`（占位，待实现后补运行方式） | `README.md` | 未验证 | 无（文件为纯新增） |
 
+## 2026-10-13 14:00 去除文件残留：不写日志、配置单文件化
+
+**改动**（用户要求：「不要在本地产生 log」「不要在其他用户电脑上产生额外文件」）
+
+1. `src\app_logger.py`：**彻底移除文件写入**——日志只送到界面日志区（sink 回调），静默模式无 sink 时直接丢弃；不再创建 `logs\` 目录。
+2. `src\config_store.py`：配置由 `config\config.json` 改为**程序同目录下的单文件 `config.json`**（不再创建子目录）；新增 `remove_config()`；移除 `config_dir()`、`log_dir()`。
+3. `src\app.py`：
+   - `Logger` 接入界面 sink，日志统一由一处输出（去除原先 logger 与 `_post("log")` 的重复输出）；
+   - `_save_config_safely()` 改为**按需落盘**：仅当勾选「记住密码」或「开机自动登录」时才写 `config.json`，两者都未勾选则删除该文件；未勾选「记住密码」时口令绝不写入文件。
+4. 目录调整：`config\config.sample.json` 移至根目录 `config.sample.json`；删除 `logs\` 与 `config\` 目录。
+5. `scripts\build.ps1`：配置样例复制路径同步更新。
+6. `.gitignore`：改为忽略根目录 `config.json`。
+7. `README.md`：补充「不留垃圾」说明。
+
+**验证**
+
+| 检查 | 命令 / 方式 | 结果 |
+| --- | --- | --- |
+| Python 语法 | `py_compile src\*.py` | 6 个模块通过 |
+| 残留引用 | `grep -rn "log_dir\|logs/" src\*.py` | 无 |
+| 删除逻辑接入 | `grep -n remove_config src\app.py` | 已接入 `_save_config_safely()` |
+| 目录结构 | 列出项目根 | 无 `logs\`、无 `config\`，仅 `config.sample.json` |
+| 打包 | `build.ps1 -Target all` | 见下方 |
+
 ## 2026-10-13 13:54 界面显示项目地址
 
 **改动**
