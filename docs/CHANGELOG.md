@@ -8,6 +8,23 @@
 | 2026-10-13 12:16 | 编写 `docs\PLAN.md`（需求澄清 6 项、现状核对 6 条事实、选型 9 候选评估、步骤 9 步、风险 5 项、静态验收 5 条） | `docs\PLAN.md` | 待用户确认方案 | 无（文件为纯新增） |
 | 2026-10-13 12:17 | 编写 `README.md`（占位，待实现后补运行方式） | `README.md` | 未验证 | 无（文件为纯新增） |
 
+## 2026-10-13 13:50 开源协议与首个 Release（v1.0.0）
+
+**改动**
+
+1. 新增 `LICENSE`：采用 **MIT 协议**（与 `ddddocr` 等依赖一致，允许自由使用、修改、分发，仅需保留版权声明）。
+2. `README.md` 新增「开源协议」一节，并列明第三方依赖的协议。
+3. 打标签 `v1.0.0` 并创建 GitHub Release，附带版本说明与两个构建产物。
+
+**验证**
+
+| 检查 | 命令 / 方式 | 结果 |
+| --- | --- | --- |
+| 协议文件 | 检查 `LICENSE` | MIT 全文，已入库 |
+| 标签推送 | `git push origin v1.0.0` | `* [new tag] v1.0.0 -> v1.0.0` |
+| Release 创建 | GitHub API | 成功，标题「GUIT-net-login v1.0.0」 |
+| 资产上传 | GitHub Release Assets API | `CampusNetLogin-lite.exe` 11.0 MB、`CampusNetLogin-full.exe` 158.2 MB |
+
 ## 2026-10-13 13:42 项目更名、验证码放大与若干修复
 
 **改动**
