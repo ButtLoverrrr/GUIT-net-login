@@ -271,7 +271,13 @@ class PortalClient:
             except Exception:
                 pass
         if fallback:
-            return LoginResult(False, fallback, KIND_UNKNOWN)
+            return LoginResult(
+                False,
+                "断开未生效：当前网络可能不是本程序建立的连接。"
+                "若你是通过浏览器等其他方式连接的网络，请从对应渠道断开；"
+                "或者先用本程序「连接」上网，再使用「断开网络」。",
+                KIND_UNKNOWN,
+            )
         # 门户已明确确认成功，只是生效较慢：按成功处理并说明
         return LoginResult(True, ok_message + "（生效略有延迟）", KIND_OK)
 
