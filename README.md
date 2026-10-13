@@ -31,6 +31,12 @@ python -m venv .venv
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build.ps1 -Target all
 ```
 
+## 开源协议
+
+本项目采用 [MIT 协议](LICENSE)，可自由使用、修改与分发。
+
+第三方依赖：`ddddocr`（MIT）、PyInstaller（GPL-2.0 + 例外，打包产物不受其约束）、tkinter（PSF）。
+
 ## 免责声明
 
 本工具仅为个人便利性网络连接工具：不修改、不破解、不绕过任何校园网认证、计费与限速机制；账号密码只保存在本机（可随时删除），不上传任何数据。请仅用于本人账号，并遵守所在学校的网络使用规定。
