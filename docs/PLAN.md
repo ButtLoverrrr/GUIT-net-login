@@ -97,7 +97,7 @@
 | 6 | 写 GUI 入口 | 用户截图 | `src\app.py`（含 `--silent` 分支） | 静态检查通过 |
 | 7 | 写自启与打包脚本 | 启动文件夹规范 | `src\autostart.py`、`scripts\build.ps1` | PS 语法解析零错误 |
 | 8 | 静态验收 | 全部源码 | — | 第 7 节静态命令全绿 |
-| 9 | 打包与实测（需批准） | 源码 + venv | `build\CampusNetLogin-lite.exe`、`...-full.exe` | 双击可登录、exe 可脱离 Python 运行 |
+| 9 | 打包与实测（需批准） | 源码 + venv | `build\GUIT-net-login-lite.exe`、`...-full.exe` | 双击可登录、exe 可脱离 Python 运行 |
 
 ## 6. 风险与回滚
 
@@ -140,7 +140,7 @@ powershell -NoProfile -Command "Get-Content '.\requirements.txt' -Encoding UTF8"
 ```powershell
 # 批准前留空。静态检查无法证明「能登录」与「exe 可脱离 Python 运行」，故需动态验证：
 #   a) 源码方式：.venv\Scripts\python.exe src\app.py
-#   b) 打包方式：build\CampusNetLogin-full.exe
+#   b) 打包方式：build\GUIT-net-login-full.exe
 # 影响：向校园网门户提交一次登录（GET 取页面 + POST 表单），不改任何系统设置。
 # 回滚：无持久化改动；删除 config\config.json 即清除本地口令。
 # 期望证据：界面提示登录成功；联网恢复（可打开外网页面）；logs\ 追加一条成功记录。

@@ -40,7 +40,7 @@ function Build-One {
     $pyiArgs = @(
         '--noconfirm', '--clean',
         '--onefile', '--noconsole',
-        '--name', "CampusNetLogin-$Name",
+        '--name', "GUIT-net-login-$Name",
         # 应用图标：--icon 用于 exe 文件图标；--add-data 让程序运行时能读到图标
         '--icon', (Join-Path $ProjectRoot 'assets\app.ico'),
         '--add-data', ((Join-Path $ProjectRoot 'assets') + ';assets'),
@@ -89,7 +89,7 @@ function Build-One {
         throw "PyInstaller 构建 $Name 失败（退出码 $exitCode）"
     }
 
-    $exe = Join-Path $DistDir "CampusNetLogin-$Name.exe"
+    $exe = Join-Path $DistDir "GUIT-net-login-$Name.exe"
     if (-not (Test-Path $exe)) {
         throw "构建结束但未找到产物：$exe"
     }

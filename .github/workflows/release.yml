@@ -105,8 +105,8 @@ jobs:
             "",
             "| 文件 | 体积 | 说明 |",
             "| --- | --- | --- |",
-            "| ``CampusNetLogin-full.exe`` | 约 158 MB | **推荐**，验证码自动识别，基本零输入 |",
-            "| ``CampusNetLogin-lite.exe`` | 约 11 MB | 体积小，手动输入 4 位验证码 |",
+            "| ``GUIT-net-login-full.exe`` | 约 160 MB | **推荐**，验证码自动识别，基本零输入 |",
+            "| ``GUIT-net-login-lite.exe`` | 约 19 MB | 体积小，手动输入 4 位验证码 |",
             "",
             "两个都是单文件，双击即用，不需要安装 Python。",
             "",
@@ -135,6 +135,6 @@ jobs:
           gh release create $tag `
             --title "GUIT-net-login $tag" `
             --notes-file RELEASE_NOTES.md `
-            build/CampusNetLogin-lite.exe `
-            build/CampusNetLogin-full.exe
+            build/GUIT-net-login-lite.exe `
+            build/GUIT-net-login-full.exe
           Write-Host "已发布 $tag"

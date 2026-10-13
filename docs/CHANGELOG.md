@@ -8,6 +8,23 @@
 | 2026-10-13 12:16 | 编写 `docs\PLAN.md`（需求澄清 6 项、现状核对 6 条事实、选型 9 候选评估、步骤 9 步、风险 5 项、静态验收 5 条） | `docs\PLAN.md` | 待用户确认方案 | 无（文件为纯新增） |
 | 2026-10-13 12:17 | 编写 `README.md`（占位，待实现后补运行方式） | `README.md` | 未验证 | 无（文件为纯新增） |
 
+## 2026-10-13 16:18 构建产物名统一为项目名
+
+**改动**（用户要求：「产物名字也改成项目名字」）
+
+1. 构建产物由 `CampusNetLogin-lite.exe` / `CampusNetLogin-full.exe` 改为 **`GUIT-net-login-lite.exe`** / **`GUIT-net-login-full.exe`**，与项目名统一。
+2. 涉及的引用一并更新：`scripts\build.ps1`（`--name` 与产物路径）、`.github\workflows\release.yml`（发布说明表格与上传路径）、`README.md`、`docs\PLAN.md`、`src\app.py`（模块 docstring 中的命令行示例）。
+3. 顺带把发布说明与 README 中的体积描述更新为当前实际值（约 160 MB / 约 19 MB）。
+4. 历史 Release（v1.0.0 ~ v1.0.5）中的旧名资产保留不变，不影响已发布的下载链接。
+
+**验证**
+
+| 检查 | 方式 | 结果 |
+| --- | --- | --- |
+| 残留引用 | 全仓库检索 `CampusNetLogin` | 除 CHANGELOG 历史记录外已无残留 |
+| 本地构建 | `build.ps1 -Target all` | `GUIT-net-login-lite.exe` 18.5 MB、`GUIT-net-login-full.exe` 159.4 MB |
+| 启动实测 | 运行新名 lite 并读窗口标题 | 「联网设置 v1.0.0」正常，目录无残留 |
+
 ## 2026-10-13 15:59 项目地址改为「GitHub 图标 + 项目地址」链接
 
 **改动**

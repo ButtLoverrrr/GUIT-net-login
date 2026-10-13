@@ -8,8 +8,8 @@
 
 | 版本 | 体积 | 验证码 | 说明 |
 | --- | --- | --- | --- |
-| **`CampusNetLogin-full.exe`** | 约 158 MB | **自动识别**，基本不用管 | 最省事，推荐 |
-| **`CampusNetLogin-lite.exe`** | 约 11 MB | 手动输入 4 位 | 体积小，便于传发 |
+| **`GUIT-net-login-full.exe`** | 约 160 MB | **自动识别**，基本不用管 | 最省事，推荐 |
+| **`GUIT-net-login-lite.exe`** | 约 19 MB | 手动输入 4 位 | 体积小，便于传发 |
 
 两个都是**单文件 exe，双击即用**，对方电脑不需要安装 Python。
 

@@ -2,9 +2,9 @@
 """程序入口：原生 GUI（仿「联网设置」布局） + --silent 静默登录模式。
 
 用法：
-    CampusNetLogin.exe              打开界面（默认）
-    CampusNetLogin.exe --silent     无窗口静默登录，结果用系统提示框反馈
-    CampusNetLogin.exe --console    保留控制台输出（开发调试用）
+    GUIT-net-login.exe              打开界面（默认）
+    GUIT-net-login.exe --silent     无窗口静默登录，结果用系统提示框反馈
+    GUIT-net-login.exe --console    保留控制台输出（开发调试用）
 
 界面元素对照用户需求（docs/PLAN.md 第 1 节）：
 学号 / 上网密码 / 记住密码 / 开机自动登录 / 验证码 / 连接 / 隐藏 / 退出 / 日志区。
