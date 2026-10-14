@@ -617,5 +617,3 @@ def auto_login(cfg: dict, logger, ocr=None, on_captcha=None) -> LoginResult:
         continue
     logger.error('连续 %d 次验证码识别失败' % max_retry)
     return LoginResult(False, '连续 %d 次识别失败，请手动输入验证码' % max_retry, KIND_NEED_MANUAL)
-
-# WARNING: Decompyle incomplete

@@ -1020,3 +1020,39 @@ tools\（19 文件 + README 说明）、docs\（PACKAGING/REBUILD_NOTES/STRUCTUR
   修复后复跑 61/62，perf 单独复跑 3/3 通过）。
 - 未验证：精简版重打包在本机的端到端复现（需要 full exe 基底，工具已参数化可用）；
   无 Python 环境实测仍待用户独立机器执行。
+
+## 2026-10-14 12:50 合并后代码 review（静态，全量通读）
+
+**范围**：src 六模块逐行通读、tools/build_slim_exe.py、测试 harness；对照 6f6bc74 /
+f1d0a7e / 836db9a 三个历史修复核对行为保留情况。
+
+**结论：无阻断级问题，重建代码可发布。**
+
+历史修复保留核对（全部 ✓）：
+- 登录判定：`_judge` 不再「无登录控件=成功」，泛化成功词收窄为（联网成功/登录成功）；
+- unknown → `refresh_portal_status()` 复核，且新增「提交前后状态证据」：只有
+  已知「提交前不在线、提交后在线」才据状态报成功，提交前已在线不能归因本次登录；
+- 表单来源守卫：submit 前检查 form_source，注销成功后 invalidate_form；
+- needs_login 以门户状态为准（外网探测只兜底）——「连不上」根因修复保留；
+- 在线探测多源并发 + 内容校验 + 绕开系统代理；断开确认门户优先 + 探测预算封顶。
+
+新增优化复核（合理）：SSL 上下文进程内复用（避免 Windows 证书库枚举抖动）、
+探测并发 + 全部出结论即提前返回、验证码「代」校验（防旧码提交）、日志有界 + 贴底跟随、
+淡入动画失败静默降级、`_fit_captcha_label` 像素尺寸修正、`_clean_captcha_input`
+粘贴清洗、窗口居中/小屏收敛、开机自启 .lnk 指向校正。
+
+发现并处理：
+- [警告] portal_client.py 末尾残留反编译器标记 `# WARNING: Decompyle incomplete`
+  ——与原始版本逐行比对确认 auto_login 完整（保真度门禁背书），标记已删除；
+- [提示] `_open_url` 使用 3.12+ 的 f-string 同引号嵌套语法（目标 3.13，无实际影响）；
+- [提示] `_handle` captcha 分支末尾有一个不可达 return（无害死代码，未动）；
+- [提示] `_show_captcha` 的 `im.convert(RGB)` 对带透明通道的图会黑底（实测门户
+  验证码白底不透明，无实际影响）；
+- [提示] submit() 登录提交前新增一次 GET /logoff 读取「提交前状态」（状态证据所需，
+  多一次请求；GET 不提交，无注销副作用）；
+- [提示] --silent 模式 toast 1.8s 后进程退出，提示框随之消失（与原始行为一致）。
+
+复核通过：凭据不落日志、未勾选记住密码不写盘且两者全关删配置的无痕语义、
+autostart 冻结 API 全齐（仅增私有 _ps_quote）、config_store/app_logger 冻结 API 全齐、
+单实例结构（含 GUIT_INSTANCE_PORT 测试钩子）、build_slim_exe.py 的 marshal 替换
+正确保留每条目的压缩标志。
