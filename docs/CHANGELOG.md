@@ -1092,3 +1092,20 @@ CI 构建的 slim 会随 Release 一起发布（三资产：lite / slim / full�
 **同时修复**：合并时误把另一工作线的「重建源码包 README」覆盖了项目对外 README——
 已恢复项目 README（下载选型/使用/构建/发布说明），并把重建工程记录指引补进新章节；
 版本表更新为三版本（82/19/45 MB）。
+
+## 2026-10-14 14:58 slim 上架完成：Release v1.0.15 发布三个资产
+
+| 资产 | 字节 | MiB |
+| --- | ---: | ---: |
+| GUIT-net-login-full.exe | 85,643,273 | 81.68 |
+| GUIT-net-login-lite.exe | 19,934,126 | 19.01 |
+| **GUIT-net-login-slim.exe** | **47,079,254** | **44.90** |
+
+（本机以 v1.0.12 基底重打包的同配方产物为 45.29 MiB；CI 以当次 full 为基底，44.90 MiB。）
+
+**上架过程中修掉的两个问题**
+1. [阻断] `tools/build_slim_exe.py` 打印中文在 CI 的 charmap stdout 上 UnicodeEncodeError 崩溃
+   （与 `check_bundle.py` 同一个坑）→ 启动时 reconfigure utf-8 + errors=replace；
+   已用 `PYTHONIOENCODING=cp1252` 模拟 CI 环境验证（退出码 0、零编码错误）。
+2. [阻断] 上述修复提交只动了 `tools/`，而发布工作流的触发路径没有 `tools/**`，导致 CI 未重跑、
+   Release 卡在 v1.0.14 → 触发路径补入 `tools/**`（slim 构建确实依赖该目录）。
