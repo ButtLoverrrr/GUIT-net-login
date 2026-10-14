@@ -762,7 +762,7 @@ build\CampusNetLogin-full.exe
 
 **回滚点**
 
-备份目录 `D:\Dev\temp\output\backup-20261013\GUIT-net-login-size-reduction\`：`files\`（`build.ps1` / `ocr_helper.py` / `requirements.txt`）、`manifests\`（两份 spec + 旧 `PKG-00.toc.full`）、`artifacts\`（旧 full 160.42 MiB、lite 19.41 MiB exe）、`BASELINE-MANIFEST.md`（含全部 SHA-256 与 git HEAD `4e30b86`）。回滚＝按清单逐文件覆盖，并删除本次新增的 `scripts\hooks\hook-cv2.py` 与 `scripts\check-bundle.ps1`。
+备份目录 `<本机路径>
 
 ## 2026-10-13 20:20 接手完善阶段 A：许可合规、三层清单检查器、-PythonPath、隔离副本
 
@@ -866,7 +866,7 @@ GUI 冒烟、无 Python 环境实测、正式产物替换、提交、发布。
 - **full 缩减 82,176,088 字节 = 78.37 MiB = −48.85%**；120 MiB 目标达成。
 - lite +122 字节（构建参数未变）；PKG 条目集合 **1012 = 1012 逐条一致**。
 - baseline full 与历史 full 仅差 121 字节 → 同源码重建可复现。
-- 产物只在 runRoot（`D:\Dev\temp\output\GUIT-net-login-size-reduction-20261013-2004\`），
+- 产物只在 runRoot（`<本机路径>
   仓库 `build\` 未动，正式产物未替换。
 
 **离线 OCR 等价对比（120 张固定合成样本，种子 20261013）**
@@ -949,6 +949,18 @@ user 字段留空、`options.autoConnect=false` → 不发出真实门户请求�
 
 **提交**：`git push`（HTTP/1.1）→ CI 自动重跑 Build & Release。
 
+## 2026-10-13 23:05 CI 转绿，Release v1.0.12 发布（full 缩减 48.97%）
+
+- run 38418425588（72b8233，fix(checker) UTF-8 输出）：Build & Release **success**。
+- Release v1.0.12（23:03 发布）：full.exe **85,632,368 字节（81.66 MiB）**、lite.exe 19,923,391 字节；
+  对比 v1.0.11 的 full 167,807,736 字节，**缩减 82,175,368 字节 = 78.36 MiB = −48.97%**；
+  发布说明体积已为「约 82 MB」。
+- 本地 git 网络配置已固化为 openssl 后端 + Windows CA 导出（`.git/github-ca.pem`，不入库，
+  属本机敏感信息）+ HTTP/1.1，此后 `git push` 不再依赖 schannel 吊销检查，直连/代理均可用。
+- CI 诊断三件套（trap 转注解、build-log.txt 落盘、错误行 grep）保留，后续构建失败可直接从
+  check-run 注解定位。
+- 未验证事项不变：无 Python 环境实测（用户独立机器）、窗口内交互人工验证、真实验证码样本。
+
 ## 2026-10-13 静态代码评审
 
 - 范围：基线 `afca4a0`，检查 `src/`、构建脚本、清单检查器、发布工作流、配置与相关调用；保留已有未跟踪优化方案。
@@ -958,7 +970,7 @@ user 字段留空、`options.autoConnect=false` → 不发出真实门户请求�
 - Python 静态检查（项目根执行，未导入项目模块）：
 
 ```powershell
-& 'D:\Dev\SDK\Python\3.13\python.exe' -I -c 'import ast,json,pathlib; root=pathlib.Path.cwd(); files=sorted((root / "src").glob("*.py"))+sorted((root / "scripts").rglob("*.py")); [(ast.parse(p.read_text(encoding="utf-8"), filename=str(p)), print("AST PASS", p.relative_to(root))) for p in files]; json.loads((root / "config.sample.json").read_text(encoding="utf-8")); print("JSON PASS config.sample.json")'
+& '<本机路径>' -I -c 'import ast,json,pathlib; root=pathlib.Path.cwd(); files=sorted((root / "src").glob("*.py"))+sorted((root / "scripts").rglob("*.py")); [(ast.parse(p.read_text(encoding="utf-8"), filename=str(p)), print("AST PASS", p.relative_to(root))) for p in files]; json.loads((root / "config.sample.json").read_text(encoding="utf-8")); print("JSON PASS config.sample.json")'
 ```
 
 - 结果：8 个 Python 文件语法通过，配置样例 JSON 解析通过，退出码 0。
@@ -967,10 +979,44 @@ user 字段留空、`options.autoConnect=false` → 不发出真实门户请求�
 ```powershell
 $tokens = $null
 $errors = $null
-[void][System.Management.Automation.Language.Parser]::ParseFile('D:\Dev\Projects\GUIT-net-login\scripts\build.ps1', [ref]$tokens, [ref]$errors)
+[void][System.Management.Automation.Language.Parser]::ParseFile('<本机路径>', [ref]$tokens, [ref]$errors)
 if ($errors.Count -gt 0) { $errors | Select-Object Message, Extent; exit 1 } else { 'PowerShell syntax: PASS' }
 ```
 
 - 结果：脚本语法通过，退出码 0。现有 PATH 与 SDK 中未发现 ruff、pyright、bandit；本轮未安装工具，未运行业务代码、测试、构建、GUI 或真实门户请求。
 - 核验：沿调用链复核全部发现；读取已安装 PyInstaller 源码确认缺失 hiddenimports 会记录错误后继续，而 Analysis 保留请求列表。
 - 回滚：仅撤销本节新增记录，保留原有文档与其他工作区内容。
+
+## 2026-10-14 10:50 合并「反编译重建 + 精简版」工作线（另一条 agent 工作线成果入库）
+
+**来源**：用户提供的 `build\GUIT-net-login-源码.zip`（对 v1.0.12 full exe 做反编译→重建→
+修复→精简→优化的完整工作线，含 62 项测试与完工报告）与 `build\GUIT-net-login-精简版.exe`。
+
+**精简版原理**（tools\build_slim_exe.py，已参数化去掉硬编码路径）：
+保留原 exe 的 PyInstaller 引导器字节，重写 CArchive PKG——替换 PYZ 内 6 个第一方模块
+字节码、剔除 `cv2\*` 全部载荷与 2 个未用 PIL 扩展、zlib-9 重压缩。精简版能继续 OCR 的
+关键在 `src\ocr_helper.py` 的 `_ensure_cv2_shim()`：给 ddddocr 装「按需报错」的 cv2 兼容桩
+（ddddocr 主路径零 cv2 属性访问，实测复现），若存在真 cv2 则用真件。
+
+**入库内容**：src 6 个模块（修复 + 优化：OCR 初始化线程竞态加锁、探测等待 8.1s→2.05s、
+断开确认 6.0s→4.0s 等）、README、tests\（9 文件，模拟门户 + 沙箱 harness）、
+tools\（19 文件 + README 说明）、docs\（PACKAGING/REBUILD_NOTES/STRUCTURE + 2 张 UI 截图，
+不含 3 个 .dis.txt 反汇编证据）、reports\（完工报告/backend/frontend）。
+
+**入库前处理**：
+1. 隐私清洗：22 个文件含另一台机器的本机路径（C:////Users////index、E:////trae_workspace），
+   按仓库隐私约定全部替换为占位符；build_slim_exe.py 参数化（--exe/--proj/--src 或
+   GUIT_FULL_EXE/GUIT_PROJ 环境变量）；scripts 三处本机绝对路径一并泛化。
+2. 仓库布局适配：tests 对「模块在根目录」的原工作区布局编写——run_tests.py 与
+   support.py 增加 src/ 子目录自动探测（PROJ 指向模块所在目录），子进程测试同步修复。
+3. CI 版本注入：重建版 app.py 为单引号风格，release.yml 正则改为兼容单/双引号，
+   并在注入失败时显式报错（原来会静默跳过）。
+
+**验证**：
+- AST 解析 33 个 .py 全过；tools 两个 .ps1 在 PS 7.6.6 解析通过；release.yml 版本注入
+  逻辑对合并版 app.py 自测 PASS。
+- 测试套件（模拟门户、沙箱、零真实外网请求，已审阅 support.py 确认）：62 项全部通过
+  （首跑 56/62——布局适配前 30 个因 ModuleNotFoundError 失败、perf 1 项冷启动噪声，
+  修复后复跑 61/62，perf 单独复跑 3/3 通过）。
+- 未验证：精简版重打包在本机的端到端复现（需要 full exe 基底，工具已参数化可用）；
+  无 Python 环境实测仍待用户独立机器执行。

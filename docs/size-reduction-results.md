@@ -1,7 +1,7 @@
 # 体积压缩阶段 A 结果报告（size-reduction-results）
 
 - 日期：2026-10-13 20:20（静态）/ 20:45（动态补充，GMT+8）
-- 项目：`D:\Dev\Projects\GUIT-net-login`
+- 项目：`<本机路径>
 - 状态：**阶段 A 完成**：静态验收通过；已获批完成隔离构建、清单校验、120 张样本离线 OCR
   等价对比与 GUI 冒烟（结果见第 4.1、7 节）；正式 `build\` 产物已替换、已本地提交（未推送）。
   仅剩无 Python 环境实测需用户在独立机器执行（见第 8 节）。
@@ -51,7 +51,7 @@ CI 工作流（`git diff --stat -- src requirements.txt .github` 为空）。
 | 项 | 值 |
 | --- | --- |
 | Git | 分支 `main`，HEAD `4e30b8644256b66d6fb70310576d52edd3e6e442`，工作区仅本阶段改动 |
-| 构建解释器 | `D:\Dev\Projects\GUIT-net-login\.venv\Scripts\python.exe`（3.13.16） |
+| 构建解释器 | `<本机路径>
 | 关键依赖 | ddddocr 1.6.1、onnxruntime 1.31.0、PyInstaller 6.22.3、numpy 2.5.4、Pillow 12.3.0、opencv-python 5.0.0.93、pystray 0.19.5（均未改版本） |
 | 默认模型 | `ddddocr\common_old.onnx` 13,606,051 字节，SHA-256 `B8F2AD9CBC1F2E3922A6CB9459E30824E7E2467F3FB4FD61420640E34EA0BF68` |
 | 字符集 | **内联**在 `ddddocr\models\charset_manager.py::_get_old_charset`；`charsets.py` 无任何模块引用（死代码）→ 阶段 B 需从代码提取，无 JSON 可复制 |
@@ -148,12 +148,12 @@ CI 工作流（`git diff --stat -- src requirements.txt .github` 为空）。
 
 | 路径 | 内容 |
 | --- | --- |
-| `D:\Dev\temp\output\GUIT-net-login-size-reduction-20261013-2004\baseline\` | 同源码基线副本：`src\`、`assets\`、`requirements.txt`、`config.sample.json`、`scripts\build.ps1`（**压缩前收集规则** + `-PythonPath`） |
-| `D:\Dev\temp\output\GUIT-net-login-size-reduction-20261013-2004\candidate\` | 候选副本：同上，但 `scripts\` 为本阶段新实现（`build.ps1` + `hooks\{hook-cv2.py,LICENSE,README.md}` + `check_bundle.py`） |
+| `<本机路径>
+| `<本机路径>
 | `…\20261013-2004\fixtures\`、`…\fixtures-venv\` | 检查器自检生成的 8 组合成清单样例（可供人工复核） |
 | `…\20261013-2004\logs\` | 自检与历史清单校验的完整输出及 JSON 报告 |
-| `D:\Dev\temp\output\backup-20261013\GUIT-net-login-size-reduction-20261013-2004\` | 本次修改前的 `build.ps1`、`check-bundle.ps1`、`hook-cv2.py`、3 份文档，full/lite 的 `PKG/PYZ/Analysis/EXE-00.toc` 与 spec |
-| `D:\Dev\temp\output\backup-20261013\GUIT-net-login-size-reduction\` | 更早一次备份：改前源码、旧 full/lite exe（168,215,701 / 20,357,675 字节）、`BASELINE-MANIFEST.md` |
+| `<本机路径>
+| `<本机路径>
 
 两份副本的 `src\*.py` 与原件 SHA-256 逐一核对一致（app.py、portal_client.py、config_store.py、
 ocr_helper.py、autostart.py、app_logger.py）。未复制真实 `config.json`、venv 或 `.git`。
@@ -269,5 +269,5 @@ GUI 冒烟通过（窗口出现、进程稳定、无真实门户请求）。
 `scripts\build.ps1`、`scripts\hooks\hook-cv2.py`，删除本次新增的 `scripts\check_bundle.py`、
 `scripts\hooks\LICENSE`、`scripts\hooks\README.md`（`check-bundle.ps1` 如需一并恢复亦在备份中）；
 恢复前先比较当前内容，发现并发更新即停止覆盖。不回退整个仓库，不动正式产物。
-本次动态验证全部产物位于 runRoot（`D:\Dev\temp\output\GUIT-net-login-size-reduction-20261013-2004\`），
+本次动态验证全部产物位于 runRoot（`<本机路径>
 整体删除该目录即可清除候选与诊断产物，不影响仓库与正式 `build\`。

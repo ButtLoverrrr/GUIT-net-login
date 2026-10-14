@@ -1,6 +1,6 @@
 # 体积压缩执行交接手册
 
-- 项目：`D:\Dev\Projects\GUIT-net-login`。
+- 项目：`<本机路径>
 - 日期：2026-10-13。
 - 配套方案：`docs/20261013-size-reduction-plan.md`，必须完整读取。
 - 本文作用：把方案转为可执行步骤，供其他 agent 接手；本次只编写文档，不批准代码实施、动态执行或发布。
@@ -32,7 +32,7 @@
 只读核对命令（Windows PowerShell，项目根目录）：
 
 ```powershell
-Set-Location 'D:\Dev\Projects\GUIT-net-login'
+Set-Location '<本机路径>'
 git status --short
 git diff -- scripts/build.ps1
 git diff --check
@@ -51,9 +51,9 @@ Get-FileHash .venv\Lib\site-packages\ddddocr\common_old.onnx -Algorithm SHA256
 
 ```powershell
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$repoRoot = 'D:\Dev\Projects\GUIT-net-login'
-$backupRoot = "D:\Dev\temp\output\backup-$(Get-Date -Format 'yyyyMMdd')\GUIT-net-login-size-reduction-$stamp"
-$runRoot = "D:\Dev\temp\output\GUIT-net-login-size-reduction-$stamp"
+$repoRoot = '<本机路径>'
+$backupRoot = "<本机路径>'yyyyMMdd')\GUIT-net-login-size-reduction-$stamp"
+$runRoot = "<本机路径>"
 ```
 
 备份实际待修改文件、旧 full/lite exe、相关 spec/TOC。用独立目录、逐文件复制，记录相对路径、SHA-256、字节数、Git 状态；空间不足停止。不要复制真实配置、整份 venv 或 `.git`，不要 `git reset --hard`。
@@ -133,7 +133,7 @@ GUI 模拟副本须屏蔽门户请求和 `_check_autostart`；操作不走真实
 以下文本由用户实际发送给执行 agent 后，授权其中代码实施与静态检查。本文件本身不代替用户授权。
 
 ```text
-请接手 D:\Dev\Projects\GUIT-net-login 的体积压缩阶段 A。
+请接手 <本机路径>
 完整读取工作区约束及 docs\20261013-size-reduction-plan.md、
 docs\20261013-size-reduction-agent-handoff.md，按交接手册步骤执行。
 

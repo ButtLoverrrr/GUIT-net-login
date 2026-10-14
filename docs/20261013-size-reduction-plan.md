@@ -6,7 +6,7 @@
   三层清单检查、FFmpeg basename 匹配、退出码、`-PythonPath`；记录见
   `docs\size-reduction-results.md` 与 `docs\CHANGELOG.md`）。**构建与全部动态验证尚未批准、
   未执行**。阶段 B、C 未开始。
-- 项目：`D:\Dev\Projects\GUIT-net-login`。
+- 项目：`<本机路径>
 - 推荐顺序：阶段 A 精简打包 → 验收 → 阶段 B 去除 OpenCV 依赖 → 验收；阶段 C 量化单独决策。
 
 ## 1. 目标与范围
@@ -133,9 +133,9 @@
 | 当前有未提交业务改动 | 备份当前工作区文件，不能只回滚到 Git HEAD；禁止 `git reset --hard` |
 | CI 打包与本地不一致 | 记录锁定依赖和产物清单，验证后再同步发布；不在审批前推送触发 Release |
 
-实施前备份位置：`D:\Dev\temp\output\backup-20261013\GUIT-net-login-size-reduction\`。备份所有将修改的文件、原 full/lite exe 和清单；空间不足则停下报告。模型原件保留在原环境和备份中。
+实施前备份位置：`<本机路径>
 
-候选产物和动态验证工作副本放在 `D:\Dev\temp\output\GUIT-net-login-size-reduction\`，通过验收后才替换正式 build 产物。回滚按备份逐文件恢复本次改动，删除仅本次新增的候选文件；不清理既有文件或用户凭据。
+候选产物和动态验证工作副本放在 `<本机路径>
 
 实施与检查的完整命令、体积、准确率和未验证事项记入 `docs/CHANGELOG.md`。本次未执行 lint、构建、OCR 推理或 GUI 测试。
 

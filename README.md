@@ -1,53 +1,75 @@
-# GUIT-net-login
+# GUIT-net-login 重建源码包
 
-校园网网页认证（Portal）快捷登录小工具。
+本包是 `GUIT-net-login-full.exe`（PyInstaller onefile / Python 3.13 冻结）的**反编译 → 修复 → 优化**后的完整工程，
+以及复现/验证/重新打包所需的一切。原始 exe 的 SHA256：
+`E4366A5B643D5EBBA13754207A6B6FBFDFBD2EAA5A9AECE198F7FAABFC7BE711`
 
-双击打开一个「联网设置」窗口，填好账号后点一下「连接」即可上网，不用再开浏览器、输账号密码、抄验证码。
+## 目录
 
-## 两个版本，按需选一个
+| 路径 | 说明 |
+|---|---|
+| `*.py`（根目录 6 个模块） | 交付源码：`app.py`(入口+GUI) `portal_client.py`(门户会话) `config_store.py`(配置) `ocr_helper.py`(ddddocr 封装) `app_logger.py`(日志) `autostart.py`(开机自启) |
+| `assets/` | 图标资源（`app.ico` / `app.png` / `github.png`，与原始 exe 内一致） |
+| `tests/` | 62 条用例 + 自建模拟 ASP.NET 门户与全沙箱 harness（不碰真实校园网/用户系统） |
+| `docs/` | `REBUILD_NOTES.md`(工程说明) `STRUCTURE.md`(逐函数结构与调用链) `PACKAGING.md`(精简打包依据) 反汇编取证 `*.dis.txt` 运行态截图 |
+| `reports/` | `完工报告.md`(主线总报告) `frontend.md` `backend.md`(两个 subagent 详报) |
+| `tools/` | 保真度门禁、启动性能 A/B、网络等待 A/B、精简打包、端到端与终验脚本 |
+| `reference/` | **反编译原始产物**（`src/*.py`）与 **exe 内原始字节码**（`marshal/*.marshal`）——保真度比对的"唯一真相" |
 
-| 版本 | 体积 | 验证码 | 说明 |
-| --- | --- | --- | --- |
-| **`GUIT-net-login-full.exe`** | 约 82 MB | **自动识别**，基本不用管 | 最省事，推荐 |
-| **`GUIT-net-login-lite.exe`** | 约 19 MB | 手动输入 4 位 | 体积小，便于传发 |
+## 运行
 
-两个都是**单文件 exe，双击即用**，对方电脑不需要安装 Python。
-
-## 使用
-
-1. 双击 exe，打开「联网设置」窗口（验证码会自动显示在窗口里）
-2. 填入学号、上网账号（手机号）、上网密码
-3. 点「连接」完成登录
-4. 可选：勾选「记住密码」下次免输；勾选「开机自动登录」开机自动连
-5. 需要断网时，点「断开网络」
-
-窗口右下角还有「官方平台」按钮，可直接打开校园网官方主页；状态栏会显示当前 IP 与在线状态；底部显示项目地址。
-
-> **不留垃圾**：程序不写日志；只有在勾选「记住密码」或「开机自动登录」时，才会在 exe 同目录生成一个 `config.json`。取消勾选会自动删除该文件，因此不记忆任何信息时程序不会遗留任何文件。
-
-## 从源码构建
+需要 **CPython 3.13**（本程序由 3.13 冻结）。第三方依赖：
+- 必需：`tkinter`（标准库自带）、`Pillow`（验证码显示）、`pystray`（托盘）
+- 验证码自动识别需要：`ddddocr`（+ 它的 `numpy` / `onnxruntime`；`opencv-python` 仅 ddddocr 的
+  检测/滑块/颜色过滤子模块需要，本程序不用 —— 精简构建用 `ocr_helper._ensure_cv2_shim()` 的兼容桩替代）
 
 ```powershell
-python -m venv .venv
-.venv\Scripts\python.exe -m pip install -r requirements.txt
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build.ps1 -Target all
+# 直接用某个 3.13 解释器跑源码（config.json 与日志会落在"源代码目录的上一级"——见 config_store.app_dir()）
+& <python3.13> app.py                 # 打开界面
+& <python3.13> app.py --silent         # 无窗口静默登录（结果用系统提示框反馈）
+& <python3.13> app.py --autostart      # 开机自启模式：开界面并在网络就绪后自动连接
 ```
 
-## 自动发布
+## 跑测试（62 条，全部本地沙箱）
 
-推送代码到 `main`（`src/`、`scripts/`、`requirements.txt` 有变动时）会自动触发 [发布工作流](.github/workflows/release.yml)：
+```powershell
+cd <本包根目录>
+& <本机路径>
+```
 
-1. 读取仓库现有 `v*` 标签，**补丁版本号自动 +1**（也可在 Actions 页面手动触发，选择 patch / minor / major）
-2. 把新版本号写入 `src/version.py`，界面标题与底部会显示当次版本
-3. 在云端构建 `lite` 与 `full` 两个 exe
-4. 打标签并创建 Release，附带两个 exe 与自动生成的发布说明（无需本地手工打包上传）
+覆盖：配置读写/损坏/原子写、隐藏字段解析、验证码与会话绑定、登录成功/验证码错/账号错、
+门户优先的在线判定、注销（快速路径/有界等待/探测兜底）、探测并发与早退、协议异常包装、
+OCR 降级与初始化线程安全、自启 enable/ensure/disable、GUI（连接/断开/回车/Esc/淡入/日志有界/托盘/居中）、
+静默模式返回码、单实例（含"第一实例卡住不许崩"）、启动性能门禁。
 
-## 开源协议
+## 保真度门禁（反编译重建 vs exe 内原始字节码）
 
-本项目采用 [MIT 协议](LICENSE)，可自由使用、修改与分发。
+```powershell
+& <本机路径>
+```
+`reference/marshal/*.marshal` 就是 exe 内的原始代码对象；`tools/fidelity.py` 会把本工程源码重新编译后与之逐指令比对。
 
-第三方依赖：`ddddocr`（MIT）、PyInstaller（GPL-2.0 + 例外，打包产物不受其约束）、tkinter（PSF）。
+## 重新打包成单文件 exe（体积 −41.9%）
 
-## 免责声明
+```powershell
+& <本机路径>
+& <本机路径>
+```
+做法：**复用原 exe 的 PyInstaller 引导器**（逐字节保留），只重建尾部 PKG —— 换入本工程源码的 3.13 编译产物、
+剔除实测未被引用的大件（OpenCV 29.3 MiB / PIL AVIF 4.1 MiB / PIL FreeType 1.0 MiB）、逐条目沿用原压缩标志。
+详细依据与验证见 `docs/PACKAGING.md`。脚本里的 `EXE`/`PROJ` 是绝对路径，换机器请改这两处。
 
-本工具仅为便利性网络连接工具：不修改、不破解、不绕过任何校园网认证、计费与限速机制；账号密码只保存在本机（可随时删除），不上传任何数据。请仅用于个人账号，并遵守所在学校的网络使用规定。
+## 端到端验证（自建模拟门户，不碰真实校园网）
+
+```powershell
+& <py313> tools\e2e_probe.py exe lenient        # 用"真实 exe"打模拟门户
+& <py313> tools\e2e_ocr.py <项目目录> --lenient   # 进程内：真实 HTTP + 真实 ddddocr
+& <py313> tools\final_check.py <某个 exe>         # 交付前终验：rc=0 + 完整请求链 + 门户转在线
+```
+
+## 已知取舍
+
+- 精简构建**不含 OpenCV**：本程序只调用 `DdddOcr(show_ad=False).classification()`，cv2 只被 ddddocr 的
+  目标检测/滑块/颜色过滤子模块使用（已用"陷阱 cv2"实测该路径零属性访问）。若要 `det=True` 等能力，请用完整构建。
+- 精简构建**不含 PIL 的 AVIF 插件与 FreeType 后端**：程序只解码 PNG 与绘制形状，不渲染文字。
+- `docs/` 里的 `*.dis.txt` 是 PowerShell 重定向产物（UTF-16），多数编辑器能正常打开。

@@ -76,8 +76,13 @@ jobs:
           $v = "${{ steps.ver.outputs.version }}"
           $path = "src\app.py"
           $content = Get-Content $path -Raw -Encoding utf8
+          # 兼容单/双引号两种写法（重建版源码使用单引号风格）
           $content = $content -replace 'APP_VERSION = "[^"]*"', ('APP_VERSION = "' + $v + '"')
+          $content = $content -replace "APP_VERSION = '[^']*'", ("APP_VERSION = '" + $v + "'")
           [System.IO.File]::WriteAllText((Resolve-Path $path).Path, $content, (New-Object System.Text.UTF8Encoding($false)))
+          if ($content -notmatch ('APP_VERSION = .{0,1}' + [regex]::Escape($v))) {
+            throw "版本号注入失败：src\app.py 中未找到 APP_VERSION 常量"
+          }
           Select-String -Path $path -Pattern 'APP_VERSION =' | ForEach-Object { "  已写入: " + $_.Line.Trim() }
 
       - name: 建立虚拟环境并安装依赖

@@ -1,0 +1,5 @@
+{
+ "import": 0.0848,
+ "ui_ready": 0.0546,
+ "_note": "基线 = 还原后的原始版本（反编译伪影修复完毕、Phase 3 改动之前）在 tools/py313 下 5 次冷启动取中位数，由 gure-re/perf_ab.py 测得；tests/test_perf.py 以 基线*1.25+0.10s 为回归阈值。"
+}
