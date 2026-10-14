@@ -219,7 +219,25 @@ def build_pkg(ordered, raw, start, replacements, level=9, control=False):
     return b''.join(blobs) + toc + cookie, stored, len(toc_items), dropped, saved
 
 
+def force_utf8_stdio():
+    """stdout/stderr 统一为 UTF-8 并容错。
+
+    CI（windows-latest）的重定向 stdout 是 charmap（cp1252），打印中文会直接
+    UnicodeEncodeError 崩掉（check_bundle.py 踩过同一个坑）。errors="replace" 保证
+    任何环境都不再因打印崩掉。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconf = getattr(stream, 'reconfigure', None)
+        if reconf is None:
+            continue
+        try:
+            reconf(encoding='utf-8', errors='replace')
+        except (ValueError, OSError):
+            pass
+
+
 def main():
+    force_utf8_stdio()
     global EXE, PROJ, KEEP_ALL, NO_REPLACE, NO_PYZ_TRIM
     ap = argparse.ArgumentParser()
     ap.add_argument('--out')
