@@ -1056,3 +1056,39 @@ f1d0a7e / 836db9a 三个历史修复核对行为保留情况。
 autostart 冻结 API 全齐（仅增私有 _ps_quote）、config_store/app_logger 冻结 API 全齐、
 单实例结构（含 GUIT_INSTANCE_PORT 测试钩子）、build_slim_exe.py 的 marshal 替换
 正确保留每条目的压缩标志。
+
+## 2026-10-14 14:10 精简版 slim 生产化：45.29 MiB 无损版进 CI 发布
+
+**目标**：用户要「体积 40MB 左右的精简版」（后确认 40 是约数）。
+
+**做法**：把此前实验验证过的裁剪配方固化进 `tools/build_slim_exe.py` 并接入 CI——
+CI 构建 full 后重打包出 `GUIT-net-login-slim.exe`，作为第三个发布资产。
+
+**裁剪清单（相对 full，均经包内实测验证）**
+
+| 层 | 剔除内容 | 说明 |
+| --- | --- | --- |
+| PKG | `cv2\\*`（约 82 MiB 原始） | OCR 路径不访问 cv2 属性，由 `ocr_helper._ensure_cv2_shim()` 桩兜底 |
+| PKG | `PIL\\_avif`(4.12 MiB stored)、`_imagingft`(0.96)、`_webp`(0.20)、`_imagingcms`(0.11)、`_imagingmath` | 界面只用 PNG 解码 |
+| PKG | `onnxruntime_providers_shared.dll` | CPU EP 不需要共享 provider |
+| PYZ | onnxruntime 的 quantization/tools/transformers/datasets | 纯 Python 死重量（323 个模块共 2.07 MiB stored） |
+| PYZ | pydoc(_data)、unittest、xml、_pydecimal、asyncio | GUI 程序无引用 |
+| PYZ | PIL 非 PNG 的 `*ImagePlugin`/`*ImageFile` | Pillow 对缺失插件是容错跳过 |
+
+**实测结果**：47.71 MiB（用户早期精简版）→ **45.29 MiB**（本配方，−2.42 MiB）。
+CI 构建的 slim 会随 Release 一起发布（三资产：lite / slim / full）。
+
+**过程中的两次实测拦截（都已写进 tools/README 与工具注释）**
+- 删 `numpy.libs\\*`（openblas 6.37 MiB stored）后 numpy 直接导入失败——
+  `_multiarray_umath.pyd` 对 openblas 是**加载期**依赖，不是懒加载；该刀不可用。
+- 删 `numpy._core._add_newdocs` / `numpy.ma` 同样导致 numpy 导入链断裂
+  （前者被 `numpy._core/__init__` 引用，后者被 `numpy.matrixlib` 链式引用）。
+  **结论：numpy 子模块一律不进排除表。**
+
+**验证**：包内 `OcrEngine.available()==True`；120 张固定样本的包装输出与 full 版逐张一致
+（差异 0）；GUI 冒烟通过（窗口「联网设置 v1.0.0」、单实例端口 47823、正常退出）；
+工具新增写后自校验（回读条目数与引导器长度）。baseline 与 experimental 两次构建字节级一致。
+
+**同时修复**：合并时误把另一工作线的「重建源码包 README」覆盖了项目对外 README——
+已恢复项目 README（下载选型/使用/构建/发布说明），并把重建工程记录指引补进新章节；
+版本表更新为三版本（82/19/45 MB）。

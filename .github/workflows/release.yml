@@ -96,6 +96,15 @@ jobs:
         shell: pwsh
         run: ./scripts/build.ps1 -Target all *> build-log.txt; if (-not $?) { exit 1 }
 
+      - name: 重打包精简版 slim（去掉 cv2、未用 PIL 扩展与死标准库）
+        shell: pwsh
+        run: |
+          .venv\Scripts\python.exe tools\build_slim_exe.py `
+            --exe build\GUIT-net-login-full.exe --proj . --src src `
+            --out build\GUIT-net-login-slim.exe *>> build-log.txt
+          if (-not $?) { exit 1 }
+          Write-Host ("slim: {0:N0} 字节" -f (Get-Item build\GUIT-net-login-slim.exe).Length)
+
       - name: 构建失败时输出日志诊断（注解 + 完整日志 artifact）
         if: failure()
         shell: pwsh
@@ -134,6 +143,7 @@ jobs:
             "| --- | --- | --- |",
             "| ``GUIT-net-login-full.exe`` | 约 82 MB | **推荐**，验证码自动识别，基本零输入 |",
             "| ``GUIT-net-login-lite.exe`` | 约 19 MB | 体积小，手动输入 4 位验证码 |",
+            "| ``GUIT-net-login-slim.exe`` | 约 45 MB | 精简版：功能与 full 一致，去掉未用载荷，体积最小 |",
             "",
             "两个都是单文件，双击即用，不需要安装 Python。",
             "",
@@ -163,5 +173,6 @@ jobs:
             --title "GUIT-net-login $tag" `
             --notes-file RELEASE_NOTES.md `
             build/GUIT-net-login-lite.exe `
+            build/GUIT-net-login-slim.exe `
             build/GUIT-net-login-full.exe
           Write-Host "已发布 $tag"
