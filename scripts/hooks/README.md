@@ -4,7 +4,8 @@
 - 本目录内的 `hook-cv2.py` 覆盖 `_pyinstaller_hooks_contrib` 自带的 `hook-cv2.py`，
   唯一目的是在 full 构建中**不收集** OpenCV 的 FFmpeg 视频组件。
 - 生效范围：仅 `scripts\build.ps1` 的 full 目标通过 `--additional-hooks-dir scripts\hooks` 加载；
-  lite 直接 `--exclude-module cv2`，不经过本 hook。
+  最终产物由 tools\build_slim_exe.py 在基础构建上剔除 cv2 载荷，
+  因此本 hook 只影响基础构建（校验器仍按「无 ffmpeg」断言）。
 
 ## 1. 来源与许可
 

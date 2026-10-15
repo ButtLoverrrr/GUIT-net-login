@@ -3,8 +3,8 @@
 
 用途
 ----
-在隔离构建后校验 full / lite 两种目标「收进了什么」，用于确认体积压缩阶段 A 的
-收集规则真正生效；也可对历史/备份清单做离线回归校验。
+在隔离构建后校验基础构建「收进了什么」，用于确认体积压缩阶段 A 的收集规则真正生效；
+也可对历史/备份清单做离线回归校验。
 
 覆盖三层清单
 ------------
@@ -36,8 +36,7 @@ PyInstaller 的 ``*.toc`` 是 Python 字面量（tuple/list/dict）。本脚本�
 
 用法
 ----
-    python scripts/check_bundle.py --target full  --toc-dir <work>/GUIT-net-login-full
-    python scripts/check_bundle.py --target lite  --toc-dir <work>/GUIT-net-login-lite
+    python scripts/check_bundle.py --target full  --toc-dir <work>/GUIT-net-login-base
     python scripts/check_bundle.py --target full  --toc-dir <备份目录>/manifests/full
     python scripts/check_bundle.py --selftest --selftest-out <目录>
 """
@@ -249,10 +248,10 @@ class Manifest:
 
 
 # --------------------------------------------------------------------------
-# 断言规则
+# 断言规则（只针对基础构建；最终 exe 由 tools\build_slim_exe.py 在其上再剔除未用载荷）
 # --------------------------------------------------------------------------
 # 每条规则：(级别, 匹配方式, 模式, 说明)。级别取 "required" / "forbidden" / "notice"。
-FULL_RULES = [
+RULES = [
     # 必需：默认 OCR 模型、cv2 扩展与其实际加载配置、必要的 ONNX Runtime 库、界面资源
     ("required", "res-exact", "ddddocr/common_old.onnx", "默认 OCR 模型（old=False,beta=False 时使用）"),
     ("required", "res-exact", "cv2/cv2.pyd", "cv2 扩展模块"),
@@ -290,32 +289,6 @@ FULL_RULES = [
     ("notice", "mod", "ddddocr.__main__", "CLI 入口，GUI 不使用"),
     ("notice", "mod", "ddddocr.charsets", "死代码模块"),
 ]
-
-_LITE_OCR_PACKAGES = ["ddddocr", "cv2", "onnxruntime", "numpy", "sympy", "matplotlib"]
-
-LITE_RULES = [
-    # 必需：界面基础能力（Pillow 图片解码、pystray 托盘、Tk/Tcl、应用图标）
-    ("required", "mod", "PIL.ImageTk", "验证码图片显示"),
-    ("required", "mod", "pystray._win32", "托盘后端"),
-    ("required", "mod", "tkinter", "GUI 主体"),
-    ("required", "res-exact", "assets/app.ico", "应用图标资源"),
-    ("required", "res-basename", "tk86t.dll", "Tk 运行库"),
-    ("required", "res-basename", "tcl86t.dll", "Tcl 运行库"),
-    ("required", "res-prefix", "_tk_data/", "Tk 数据文件"),
-    ("required", "res-prefix", "_tcl_data/", "Tcl 数据文件"),
-    # 禁止：lit 不含任何 OCR 相关资源或模块
-    ("forbidden", "res-prefix", "ddddocr/", "lite 不含 OCR"),
-    ("forbidden", "res-prefix", "cv2/", "lite 不含 OCR"),
-    ("forbidden", "res-prefix", "onnxruntime/", "lite 不含 OCR"),
-    ("forbidden", "res-prefix", "numpy/", "lite 不含 numpy"),
-    ("forbidden", "res-prefix", "numpy.libs/", "lite 不含 numpy"),
-    ("forbidden", "res-basename", "opencv_videoio_ffmpeg*.dll", "lite 不应出现 FFmpeg 组件"),
-]
-
-for _pkg in _LITE_OCR_PACKAGES:
-    LITE_RULES.append(("forbidden", "mod", _pkg, f"lite 不含 {_pkg}"))
-    LITE_RULES.append(("forbidden", "mod-prefix", f"{_pkg}.", f"lite 不含 {_pkg} 子模块"))
-
 
 def rule_hits(manifest: Manifest, kind: str, pattern: str):
     if kind == "res-exact":
@@ -406,7 +379,7 @@ def check_target(target: str, toc_dir: Path, as_json: Path | None, out=print) ->
     for note in manifest.notes:
         out(f"  [注意] {note}")
 
-    rules = FULL_RULES if target == "full" else LITE_RULES
+    rules = RULES
     failures, notices, lines = run_checks(manifest, rules)
     for tag, text in lines:
         prefix = {"通过": "[通过]", "失败": "[失败]", "提示": "[提示]"}.get(tag, "        ")
@@ -543,26 +516,6 @@ def write_fixture(root: Path, case: str):
         analysis([], [], [], [], [])
         return d, EXIT_ASSERT_FAILED
 
-    if case == "lite_ok":
-        pkg([
-            _entry(r"assets\app.ico"),
-            _entry("tk86t.dll", "", "BINARY"), _entry("tcl86t.dll", "", "BINARY"),
-            _entry(r"_tk_data\images\logo.gif"), _entry(r"_tcl_data\encoding\ascii.enc"),
-        ])
-        pyz(["PIL.ImageTk", "pystray._win32", "tkinter", "tkinter.filedialog"])
-        analysis(["pystray._win32", "PIL.ImageTk"], [], [], [], ["ddddocr", "cv2", "numpy"])
-        return d, EXIT_PASS
-
-    if case == "lite_wrong_ocr":
-        pkg([
-            _entry(r"assets\app.ico"), _entry("tk86t.dll", "", "BINARY"), _entry("tcl86t.dll", "", "BINARY"),
-            _entry(r"_tk_data\images\logo.gif"), _entry(r"_tcl_data\encoding\ascii.enc"),
-            _entry(r"ddddocr\common_old.onnx"), _entry(r"cv2\cv2.pyd", "", "EXTENSION"),
-        ])
-        pyz(["PIL.ImageTk", "pystray._win32", "tkinter", "ddddocr", "cv2", "numpy"])
-        analysis([], [], [], [], [])
-        return d, EXIT_ASSERT_FAILED
-
     if case == "unknown_structure":
         (d / PKG_NAME).write_text("{'not': 'a toc'}\n", encoding="utf-8")
         pyz(["x"])
@@ -581,12 +534,10 @@ def write_fixture(root: Path, case: str):
 
 SELFTEST_CASES = [
     "full_ok", "full_violations", "full_missing_model",
-    "lite_ok", "lite_wrong_ocr",
     "unknown_structure", "broken_literal", "missing_pyz",
 ]
 SELFTEST_TARGET = {
     "full_ok": "full", "full_violations": "full", "full_missing_model": "full",
-    "lite_ok": "lite", "lite_wrong_ocr": "lite",
     "unknown_structure": "full", "broken_literal": "full", "missing_pyz": "full",
 }
 
@@ -614,7 +565,7 @@ def selftest(keep_dir: Path | None) -> int:
 def main(argv=None) -> int:
     force_utf8_stdio()
     parser = argparse.ArgumentParser(description="PyInstaller 打包清单检查器（只读，标准库）")
-    parser.add_argument("--target", choices=["full", "lite"], help="构建目标")
+    parser.add_argument("--target", choices=["full"], help="构建目标（只保留基础构建一种）")
     parser.add_argument("--toc-dir", type=Path, help="包含 PKG-00.toc / PYZ-00.toc 的目录")
     parser.add_argument("--json", type=Path, default=None, help="可选：写出 JSON 报告")
     parser.add_argument("--selftest", action="store_true", help="运行内置合成样例自检")

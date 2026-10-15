@@ -1109,3 +1109,33 @@ CI 构建的 slim 会随 Release 一起发布（三资产：lite / slim / full�
    已用 `PYTHONIOENCODING=cp1252` 模拟 CI 环境验证（退出码 0、零编码错误）。
 2. [阻断] 上述修复提交只动了 `tools/`，而发布工作流的触发路径没有 `tools/**`，导致 CI 未重跑、
    Release 卡在 v1.0.14 → 触发路径补入 `tools/**`（slim 构建确实依赖该目录）。
+
+## 2026-10-15 13:30 收敛为单一产物：build\GUIT-net-login.exe（lite/full 退出）
+
+**用户决定**：删除历史 Release 资产，并彻底移除 lite 构建线，只保留一个产物且不带后缀。
+
+**构建流程重构（scripts\build.ps1）**——两段式，最终只有一个产物：
+
+1. PyInstaller 基础构建（精确收集规则不变：只收默认模型、不收 FFmpeg 组件），
+   产物落 `build\_work\dist\GUIT-net-login-base.exe`、中间件落 `build\_work\`，
+   保证 `build\` 根目录只有给用户的 exe；
+2. `scripts\check_bundle.py --target full` 校验基础构建清单；
+3. `tools\build_slim_exe.py` 在基础 exe 上剔除未用载荷并换成当前源码，
+   输出 **`build\GUIT-net-login.exe`**（工具自带写后自校验）。
+
+参数变化：`build.ps1` 不再有 `-Target`（永远只产出单文件 exe）；`check_bundle.py`
+删除 lite 目标与其规则（`FULL_RULES` 更名 `RULES`，自检样例同步精简）。
+
+**同步更新**：CI 构建步骤合并为一步（不再单独跑 slim 重打包），发布资产只有一个
+`GUIT-net-login.exe`，发布说明表格改单行；README 改为单版本说明；`tools\README.md`、
+`scripts\hooks\README.md` 措辞同步；历史文档（size-reduction 系列、REBUILD_*、reports）
+保留为当时的记录，不回改。
+
+**本机验证（新流程实测）**：
+- `build.ps1` 退出码 0，产出 `build\GUIT-net-login.exe` **47,486,197 字节（45.29 MiB）**，
+  重打包自校验 OK（回读 1391 条目、引导器 403968 字节）；
+- 同配方探针包：`engine_available=True`、`numpy_ok=True`，120 张固定样本的包装输出与
+  full 基线**逐张一致（差异 0）**；
+- GUI 冒烟通过（窗口「联网设置 v1.0.0」、单实例端口 47823、正常退出）。
+- `build\` 里的旧 exe（full/lite/slim/精简版）已移至
+  `temp\output\backup-20261015\`（环境安全删除守卫拒绝直接删除，改用移动）。
