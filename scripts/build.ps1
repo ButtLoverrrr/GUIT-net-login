@@ -132,6 +132,11 @@ $pyiArgs = @(
     # pystray 的平台后端与 Pillow 的 tkinter 桥接是动态/隐式导入，显式声明避免漏收
     '--hidden-import', 'pystray._win32',
     '--hidden-import', 'PIL.ImageTk',
+    # OCR 接口层：app 只依赖 src\ocr.py 的契约，具体实现（ocr_helper）由注册表惰性导入，
+    # 静态分析看不到 → 必须显式声明，否则打包后 OCR 静默消失（只剩手输）。
+    # check_bundle.py 有对应断言，漏收会在构建阶段直接失败。
+    '--hidden-import', 'ocr',
+    '--hidden-import', 'ocr_helper',
     '--hidden-import', 'ddddocr',
     '--copy-metadata', 'ddddocr',
     '--add-data', ($DdddOcrModel + ';ddddocr'),

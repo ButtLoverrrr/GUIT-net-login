@@ -31,7 +31,9 @@ def _boot(mode='right'):
     cfg = portal.config()
     appmod.load_config = lambda: json.loads(json.dumps(cfg))
     appmod.toast = lambda *a, **k: None            # 绝不弹真实系统对话框
-    appmod.OcrEngine = lambda *a, **k: _StubOcr(portal, mode)
+    # OCR 现在是「按配置装配」的接口（见 src/ocr.py）；桩引擎替换装配点即可，
+    # 不必关心背后是 ddddocr 还是别的实现。
+    appmod.build_ocr_engine = lambda *a, **k: _StubOcr(portal, mode)
     return sb, appmod, portal, cfg
 
 

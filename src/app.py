@@ -76,9 +76,21 @@ except Exception:
 import autostart
 from app_logger import Logger
 from config_store import (app_dir, has_credential, load_config, remove_config, save_config)
-from ocr_helper import OcrEngine
+from ocr import OcrBackend, create_engine
 from portal_client import (KIND_CAPTCHA, KIND_NEED_MANUAL, LoginSession, PortalError, auto_login)
 APP_VERSION = '1.0.0'
+
+
+def build_ocr_engine(cfg: dict, length: int = 4) -> OcrBackend:
+    '''按配置装配验证码识别引擎（全程序唯一的装配点）。
+
+    界面与登录流程只依赖 `ocr.OcrBackend` 契约（available / classify），
+    具体实现由 `options.ocrBackend` 决定（默认 ddddocr，`none` 表示只用手输）；
+    需要接入别的实现时只在本函数里换装配方式，不动业务代码。
+    测试替换本函数即可注入桩引擎。
+    '''
+
+    return create_engine(cfg, length)
 
 def resource_path(name: str) -> str:
     '''资源文件（应用图标等）路径。
@@ -135,7 +147,7 @@ def run_silent() -> int:
     if not has_credential(cfg):
         logger.warn('未配置账号，转入界面模式')
         return 3
-    result = auto_login(cfg, logger, OcrEngine())
+    result = auto_login(cfg, logger, build_ocr_engine(cfg))
     if result.ok:
         toast('已连接校园网\n%s' % result.message)
         return 0
@@ -148,10 +160,10 @@ def run_silent() -> int:
 class LoginApp:
     '''「联网设置」主窗口。'''
 
-    def __init__(self, root: tk.Tk, auto_connect: bool=False):
+    def __init__(self, root: tk.Tk, auto_connect: bool=False, ocr: OcrBackend=None):
         self.root = root
         self.cfg = load_config()
-        self.ocr = OcrEngine()
+        self.ocr = ocr if ocr is not None else build_ocr_engine(self.cfg)
         self.session = None
         self.busy = False
         self.auto_connect = auto_connect
@@ -688,9 +700,9 @@ class LoginApp:
             self.session = LoginSession(self.cfg, self.logger)
 
     def _use_ocr(self) -> bool:
-        '''是否启用自动识别：配置开关开启且 ddddocr 引擎可用。
+        '''是否启用自动识别：`options.useOcr` 开启且所选引擎（见 ocr.py 契约）可用。
 
-        注意：首次调用会触发引擎初始化（约 1~2 秒），因此只应在后台线程中调用。
+        注意：首次调用会触发引擎初始化（ddddocr 约 1~2 秒），因此只应在后台线程中调用。
         '''
 
         if not bool((self.cfg.get('options') or {}).get('useOcr', True)):

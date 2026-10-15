@@ -10,12 +10,12 @@ import support
 
 
 class StubOcrEngine:
-    """`app.OcrEngine` 的替身：不 import ddddocr。
+    """`ocr.OcrBackend` 契约的替身：不 import ddddocr（接口见 src/ocr.py）。
 
     为什么必须在 _boot 里就装上：`_prefetch_worker` 会调 `_use_ocr()` →
-    `OcrEngine.available()` → `import ddddocr`，而 ddddocr 首次导入要拉起
+    `Engine.available()` → `import ddddocr`，而 ddddocr 首次导入要拉起
     onnxruntime/cv2/numpy，实测会阻塞预取线程 15 秒以上（线程栈实证：
-    app.py:879 → ocr_helper.py:25 → ddddocr/__init__）。这会与本用例自己的
+    app.py → ocr_helper.py → ddddocr/__init__）。这会与本用例自己的
     连接流程抢 busy 状态，造成随机失败。真实 OCR 由 test_backend 覆盖，这里
     只关心界面流程。
     """
@@ -47,14 +47,14 @@ def _boot(ocr_mode='right'):
     appmod.load_config = config_store.load_config
     root = tk.Tk()
     root.withdraw()
-    # 必须在 LoginApp 之前替换引擎工厂：__init__ 里就 new 了一个，而启动预取
-    # 200ms 后就会用到它。
-    real_engine = appmod.OcrEngine
-    appmod.OcrEngine = lambda *_a, **_k: StubOcrEngine(portal, ocr_mode)
+    # 必须在 LoginApp 之前替换引擎装配点：__init__ 里就装配了一个，而启动预取
+    # 200ms 后就会用到它。（OCR 已解耦为可插拔接口，见 src/ocr.py 与 docs/ocr-interface.md）
+    real_factory = appmod.build_ocr_engine
+    appmod.build_ocr_engine = lambda *_a, **_k: StubOcrEngine(portal, ocr_mode)
     try:
         ui = appmod.LoginApp(root)
     finally:
-        appmod.OcrEngine = real_engine
+        appmod.build_ocr_engine = real_factory
     ui.ocr = StubOcrEngine(portal, ocr_mode)
     return sb, cs, portal, cfg, appmod, root, ui, original, config_store
 

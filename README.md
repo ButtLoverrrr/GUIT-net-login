@@ -46,8 +46,9 @@ pwsh -NoProfile -File scripts\build.ps1
 
 ## 工程质量记录
 
-本仓库另含一轮「反编译 → 修复 → 优化」的完整工程：`tests\`（62 条沙箱用例 + 自建模拟门户）、
+本仓库另含一轮「反编译 → 修复 → 优化」的完整工程：`tests\`（67 条沙箱用例 + 自建模拟门户）、
 `tools\`（保真度门禁、性能 A/B、精简打包脚本）、`docs\REBUILD_NOTES.md`、`docs\PACKAGING.md`、
+`docs\ocr-interface.md`（验证码识别接口：实现可插拔，默认 ddddocr，可配置更换）、
 `reports\完工报告.md`。
 
 ## 自动发布

@@ -1,10 +1,14 @@
-'''验证码识别封装（ddddocr，MIT）。
+'''验证码识别实现：ddddocr（MIT）——`ocr.OcrBackend` 契约的默认后端。
+
+业务代码只依赖 `ocr.py` 里的契约（`available()` / `classify()`），本模块是其中一个
+可替换实现：导入时向 `ocr` 注册名字 `"ddddocr"`，由 `options.ocrBackend` 选中
+（见 docs/ocr-interface.md）。换实现不必改 app / portal_client。
 
 设计要点：
 - 延迟初始化：ddddocr 首次加载 onnx 模型需要约 1~2 秒，且只有「连接」时才用到，
   因此不在启动时构造，避免拖慢界面出现速度；
 - 失败静默降级：任何异常都返回空串，由上层回退到手输验证码，不影响主流程；
-- lite 构建（不含 ddddocr）时 available() 恒为 False，程序自动只用「手输」；
+- 不含 ddddocr 的构建（若将来有）里 available() 恒为 False，程序自动只用「手输」；
 - 线程安全：预取线程可能正在加载引擎，而用户此时点了「连接」（另一个线程）——
   旧写法先把 _initialized 置 True 再初始化，第二个线程会读到"已初始化但没有引擎"
   从而误判「OCR 不可用」并要求手输验证码（实测复现：[False, True]）。加锁后
@@ -14,6 +18,8 @@
 import sys
 import threading
 import types
+
+from ocr import OcrBackend, register_backend
 
 _CV2_SHIM_DONE = False
 
@@ -54,9 +60,10 @@ def _ensure_cv2_shim() -> None:
     _CV2_SHIM_DONE = True
 
 
-class OcrEngine:
-    '''ddddocr 的薄封装：可用时返回 4 位识别结果，不可用返回空串。'''
+class OcrEngine(OcrBackend):
+    '''ddddocr 后端：可用时返回 4 位识别结果，不可用返回空串。'''
 
+    name = 'ddddocr'
     CAPTCHA_LENGTH = 4
     def __init__(self, length: int=4):
         self.CAPTCHA_LENGTH = length
@@ -93,3 +100,8 @@ class OcrEngine:
         # 取长度用实例上的 CAPTCHA_LENGTH（构造参数会覆盖类常量）。
         text = ''.join((ch for ch in str(raw) if ch.isalnum()))
         return text[:self.CAPTCHA_LENGTH]
+
+
+# 向接口层注册本实现：`options.ocrBackend = "ddddocr"`（默认）即选中它。
+# replace=True：允许测试或热重载重复导入本模块而不报「已注册」。
+register_backend('ddddocr', (lambda length=4: OcrEngine(length)), replace=True)

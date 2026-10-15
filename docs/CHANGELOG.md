@@ -1167,3 +1167,39 @@ CI 构建的 slim 会随 Release 一起发布（三资产：lite / slim / full�
 - OCR 回归：`engine_available=True`、120 张固定样本与基线**逐张一致（差异 0）**；
 - GUI 冒烟：窗口「联网设置 v1.0.0」、单实例端口 47823、正常退出；
 - 产物 47,503,449 字节（45.30 MiB），比修复前 +5.7 KB。
+
+## 2026-10-15 14:35 OCR 接口解耦：实现可插拔，业务代码只依赖契约
+
+**目标**：界面与登录流程不应知道背后是 ddddocr、自研 ONNX 还是根本没有 OCR；
+换引擎（或临时关闭）不改业务代码、不动界面逻辑。
+
+**结构（新增 src/ocr.py 为接口层）**
+
+| 位置 | 职责 |
+| --- | --- |
+| `src/ocr.py` | 契约 `OcrBackend`（`available()` / `classify()`）、`NullBackend`（显式关闭）、注册表 `register_backend()`、按名装配 `create_backend()`、配置读取 `backend_name_of()` / `create_engine()`；**不 import ddddocr** |
+| `src/ocr_helper.py` | 默认实现（ddddocr），导入时注册名字 `"ddddocr"`；原有语义与 `_engine/_initialized` 内部结构保持不变（既有测试不动） |
+| `src/app.py` | 新增 `build_ocr_engine(cfg)`——全程序唯一装配点；`LoginApp(root, auto_connect, ocr=...)` 支持注入 |
+| `src/portal_client.py` | `auto_login(cfg, logger, ocr=...)` 本就按契约调用（鸭子类型），无需改动 |
+| 配置 | `options.ocrBackend`（默认 `ddddocr`，可设 `none`；未知名字安全降级为 `none`）+ 历史开关 `options.useOcr` |
+
+**打包约束（关键，已加断言防漏）**：实现模块由注册表**惰性导入**，PyInstaller 静态分析
+看不到 → `scripts/build.ps1` 增加 `--hidden-import ocr / ocr_helper`；
+`scripts/check_bundle.py` 的 RULES 增加 `ocr`、`ocr_helper` 两条 required 断言，
+漏收会在构建阶段直接失败（自检样例已同步）。
+
+**文档**：新增 `docs/ocr-interface.md`（契约、配置、接入自定义实现的步骤与实现方约束）。
+
+**验证**（打包产物内实测）
+- OCR：`engine_available=True`、120 张固定样本包装输出与基线**逐张一致（差异 0）**；
+- 托盘：`Icon.visible=True`、`_icon_valid=True`（解耦未影响上一处修复）；
+- GUI 冒烟：窗口「联网设置」+ 单实例端口 + 正常退出；
+- 测试套件：**66/67**（新增 5 条接口层用例：注册表按名装配、未知名字降级、配置选择、
+  ocr_helper 自注册、app 唯一装配点）。唯一失败项 `test_perf.test_ui_ready_time`
+  经 `git stash` 对照确认为**改动前同样失败**——该门槛按另一台机器标定
+  （基线 0.0546s，本机 0.19~0.27s），与本改动无关。
+- 产物 47,505,762 字节（45.31 MiB）。
+
+**注意**：新用例一开始在测试进程里调用了默认后端的 `available()`，把真 ddddocr /
+onnxruntime / cv2 拉进了测试进程，导致同进程后续用例（silent）与 perf 子进程受扰而失败；
+改为只做契约断言（不触发真实引擎）后恢复全绿——测试里不要顺手初始化重引擎。

@@ -31,7 +31,8 @@
     "remember": true,
     "autostart": false,
     "useOcr": true,
-    "autoConnect": true
+    "autoConnect": true,
+    "ocrBackend": "ddddocr"
   },
   "maxCaptchaRetry": 3,
   "onlineProbe": {

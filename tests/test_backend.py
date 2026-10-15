@@ -896,3 +896,82 @@ class _Logger:
 
     def set_sink(self, s):
         pass
+
+
+# ---------------------------------------------------------------------------
+# OCR 接口层（src/ocr.py）：业务代码只依赖契约，实现按名字装配
+# ---------------------------------------------------------------------------
+
+def test_ocr_registry_selects_backend_by_name():
+    """注册自己的实现后，按名字就能装配出来（换引擎不改业务代码）。"""
+    import ocr
+
+    class MyBackend(ocr.OcrBackend):
+        name = 'my-test'
+
+        def __init__(self, length=4):
+            self.CAPTCHA_LENGTH = length
+
+        def available(self):
+            return True
+
+        def classify(self, png):
+            return 'abcd'[:self.CAPTCHA_LENGTH]
+
+    ocr.register_backend('my-test', lambda length=4: MyBackend(length), replace=True)
+    eng = ocr.create_backend('my-test', 2)
+    assert isinstance(eng, ocr.OcrBackend), '实现必须满足契约'
+    assert eng.available() is True and eng.classify(b'x') == 'ab'
+    assert 'my-test' in ocr.available_backends()
+
+
+def test_ocr_unknown_backend_falls_back_to_null():
+    """未知后端名不能抛异常：安全降级为「不可用」，由调用方回退手输。"""
+    import ocr
+
+    eng = ocr.create_backend('definitely-not-a-backend')
+    assert isinstance(eng, ocr.NullBackend)
+    assert eng.available() is False
+    assert eng.classify(b'\x89PNG') == ''
+    assert ocr.create_backend(None) is not None, '缺省名不应炸'
+
+
+def test_ocr_config_chooses_backend_and_respects_useocr():
+    """配置装配：options.ocrBackend 选实现，useOcr=False 一律等价于 none。"""
+    import ocr
+
+    assert ocr.create_engine({'options': {'ocrBackend': 'none'}}).available() is False
+    assert ocr.create_engine({'options': {'useOcr': False}}).available() is False
+    assert ocr.create_engine({}) is not None, '缺省配置不应炸'
+    assert ocr.backend_name_of({}) == 'ddddocr'
+    assert ocr.backend_name_of({'options': {'ocrBackend': 'none'}}) == 'none'
+    assert ocr.backend_name_of({'options': {'useOcr': False, 'ocrBackend': 'ddddocr'}}) == 'none'
+
+
+def test_ocr_helper_registers_dddocr_backend():
+    """默认实现由 ocr_helper 在导入时注册，且满足同一契约。"""
+    import ocr
+    import ocr_helper
+
+    assert 'ddddocr' in ocr.available_backends()
+    eng = ocr.create_backend('ddddocr')
+    assert isinstance(eng, ocr.OcrBackend)
+    assert isinstance(eng, ocr_helper.OcrEngine), '名字 ddddocr 必须装配到 ocr_helper.OcrEngine'
+
+
+def test_app_build_ocr_engine_is_the_only_assembly_point():
+    """app.build_ocr_engine 是唯一装配点：配置换后端，界面代码不用改。
+
+    注意：这里**不调用**默认后端的 available()——那会把真的 ddddocr /
+    onnxruntime / cv2 拉进测试进程（实测会拖慢同进程后续用例与 perf 子进程），
+    真实引擎的可用性由打包产物的探针验证。
+    """
+    import app as appmod
+    import ocr
+
+    none_eng = appmod.build_ocr_engine({'options': {'ocrBackend': 'none'}})
+    assert isinstance(none_eng, ocr.NullBackend) and none_eng.available() is False
+
+    default_eng = appmod.build_ocr_engine({'options': {}})
+    assert isinstance(default_eng, ocr.OcrBackend), '默认后端必须满足契约'
+    assert default_eng.name == 'ddddocr', '默认后端应为 ddddocr 实现'

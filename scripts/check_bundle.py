@@ -261,6 +261,8 @@ RULES = [
     ("required", "res-exact", "onnxruntime/capi/onnxruntime_pybind11_state.pyd", "ONNX Runtime Python 绑定"),
     ("required", "res-exact", "assets/app.ico", "应用图标资源"),
     # 必需：识别链路模块
+    ("required", "mod", "ocr", "OCR 接口层（业务代码只依赖它的契约）"),
+    ("required", "mod", "ocr_helper", "ddddocr 后端实现（惰性导入，靠 --hidden-import 收进包）"),
     ("required", "mod", "ddddocr", "ddddocr 包"),
     ("required", "mod", "ddddocr.compat.v1", "兼容层主类"),
     ("required", "mod", "ddddocr.core.ocr_engine", "OCR 推理引擎"),
@@ -475,7 +477,7 @@ def write_fixture(root: Path, case: str):
         ])
         pyz(["ddddocr", "ddddocr.compat.v1", "ddddocr.core.ocr_engine", "ddddocr.models.model_loader",
              "ddddocr.models.charset_manager", "ddddocr.preprocessing.image_processor",
-             "ddddocr.utils.exceptions", "numpy", "cv2", "onnxruntime", "PIL.ImageTk", "pystray._win32"])
+             "ddddocr.utils.exceptions", "ocr", "ocr_helper", "numpy", "cv2", "onnxruntime", "PIL.ImageTk", "pystray._win32"])
         analysis(["ddddocr", "pystray._win32", "PIL.ImageTk"], [], [], [], [])
         return d, EXIT_PASS
 
@@ -512,7 +514,7 @@ def write_fixture(root: Path, case: str):
         ])
         pyz(["ddddocr", "ddddocr.compat.v1", "ddddocr.core.ocr_engine", "ddddocr.models.model_loader",
              "ddddocr.models.charset_manager", "ddddocr.preprocessing.image_processor",
-             "ddddocr.utils.exceptions", "numpy", "cv2", "onnxruntime", "PIL.ImageTk", "pystray._win32"])
+             "ddddocr.utils.exceptions", "ocr", "ocr_helper", "numpy", "cv2", "onnxruntime", "PIL.ImageTk", "pystray._win32"])
         analysis([], [], [], [], [])
         return d, EXIT_ASSERT_FAILED
 
