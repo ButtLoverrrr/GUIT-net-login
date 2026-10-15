@@ -2,6 +2,20 @@
 
 > 数据来源：exe 内 PyInstaller PYZ 的原始 marshal 代码对象（CPython 3.13），
 > 由 `guit-re/analyze.py` 静态提取，不执行程序。
+>
+> **版本说明**：下面的表格来自 **2026-10-13 反编译重建期**的字节码基线
+> （那时还没有 `src/ocr.py`），是历史证据，不予改写。OCR 解耦（2026-10-15）之后
+> **当前源码的调用链**是：
+>
+> ```
+> app / portal_client → ocr（契约 + 按名装配 + safe_* 兜底） → ocr_helper（默认实现） → ddddocr
+> ```
+>
+> 即 `app` 经 `build_ocr_engine()` → `ocr.create_engine()` 装配引擎，`portal_client`
+> 只依赖 `ocr.safe_available()` / `ocr.safe_classify()`；业务代码不再直接引用
+> `ocr_helper.OcrEngine`。重跑 `tools/analyze.py`（需 `work\marshal` 基线）即可
+> 重新生成本文件，届时 `MODULES` 已含 `ocr`、跨模块边会显示 `app → ocr`。
+
 
 ## 模块规模与导入
 
@@ -168,6 +182,10 @@
 | `disable` | 149 | 235 | join, lnk_path, lnk_path.cmd_path, os.remove, path.basename, path.exists |
 
 ## 跨模块调用边（静态）
+
+> 以下为历史字节码基线的边。当前源码新增/修正的边（OCR 解耦后）：
+> `app → ocr`（`OcrBackend, create_engine, safe_available, safe_classify`）、
+> `portal_client → ocr`（`safe_available, safe_classify`）。
 
 - `app` → `portal_client`：LoginSession, PortalError, auto_login
 - `app` → `config_store`：app_dir, has_credential, load_config, remove_config, save_config

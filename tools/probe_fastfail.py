@@ -13,7 +13,8 @@ import support  # noqa: E402
 
 sb = support.Sandbox(os.path.join(os.environ.get('TEMP', '.'), 'verify-fast'))
 sb.install()
-for _m in ('portal_client', 'config_store', 'autostart', 'ocr_helper', 'app_logger'):
+# 'ocr'：OCR 接口层（portal_client 直接依赖）；'ocr_helper'：默认实现——都要清。
+for _m in ('portal_client', 'config_store', 'autostart', 'ocr', 'ocr_helper', 'app_logger'):
     sys.modules.pop(_m, None)
 while PROJ in sys.path:
     sys.path.remove(PROJ)

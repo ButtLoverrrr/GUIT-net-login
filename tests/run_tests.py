@@ -1,7 +1,8 @@
 """统一测试入口（零第三方依赖）。
 
 用法:
-    tools\\py313\\python.exe tests\\run_tests.py [backend|gui|perf|all]
+    tools\\py313\\python.exe tests\\run_tests.py [backend|ocr|gui|perf|all]
+    （`ocr` 只跑 OCR 解耦回归：tests\\test_ocr_decoupling.py）
 退出码 0 = 全部通过；1 = 有失败。
 """
 import importlib
@@ -48,6 +49,11 @@ def main():
     if which in ('all', 'backend'):
         print('== 后端 ==')
         p, f = run('test_backend', only)
+        total_passed += p
+        total_failed += f
+    if which in ('all', 'ocr'):
+        print('== OCR 解耦（接口层 / 配置类型 / 打包清单） ==')
+        p, f = run('test_ocr_decoupling', only)
         total_passed += p
         total_failed += f
     if which in ('all', 'gui'):

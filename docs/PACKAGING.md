@@ -1,5 +1,13 @@
 # 精简打包说明（体积 −41.9%，功能验证通过）
 
+> **版本说明**：本文的模块清单与验证数据来自 2026-10-13/14 的重建工作线。
+> OCR 解耦（2026-10-15）后第一方模块新增接口层 `src/ocr.py`，重打包脚本的
+> `tools/build_slim_exe.py` 里 `PYZ_MODULES` 现为
+> `portal_client, config_store, ocr, ocr_helper, app_logger, autostart`
+> （**漏掉 `ocr` 会让精简产物在 `import ocr` 时直接失败**）；
+> 新版 OCR 装配入口是 `app.build_ocr_engine(cfg)`（见 `docs/ocr-interface.md`）。
+> 下列历史数字未重测，不作为当前产物的实测结论。
+
 产物：`<本机路径>
 - 大小 **50,030,419 字节（47.71 MiB）**；原版 **86,039,734 字节（82.05 MiB）** → **−41.9%**
 - SHA256：`8CDA8EE77B2E444DEEA9DA258FA9E203CDF64145512D830E9D60A32BEFD93641`
@@ -7,8 +15,9 @@
 ## 做法：复用原引导器 + 重建归档（不重新打包、不引入外部依赖）
 
 原 exe 是 `[PyInstaller 引导器 PE][CArchive(PKG) 归档]`。本方案**逐字节保留原引导器**，只重建 PKG：
-1. 把 `app.py` 与 `portal_client/config_store/ocr_helper/app_logger/autostart` 用 CPython 3.13 重新编译成 marshal，
-   分别替换 PKG 里的入口脚本与 PYZ 里的 5 个模块（PYZ 按原格式重建，其余模块原样搬运）；
+1. 把 `app.py` 与 `portal_client/config_store/ocr/ocr_helper/app_logger/autostart` 用 CPython 3.13
+   重新编译成 marshal，分别替换 PKG 里的入口脚本与 PYZ 里的 6 个模块（PYZ 按原格式重建，其余模块原样搬运）；
+   （重建期为 5 个模块；OCR 解耦后加入 `ocr`，共 6 个。）
 2. 剔除**经实测证明未被引用**的大块（见下）；
 3. 每个条目沿用**原始的压缩标志**（PyInstaller 的引导器对 PYZ 等条目不 inflate，标志必须一致）。
 
@@ -30,8 +39,8 @@
 1. **结构自检**：新 exe 的 cookie/TOC 可解析，1395 条目（原 1409），`app` 可 unmarshal，PYZ 743 模块可加载，
    每条 TOC 记录 16 字节对齐且名字带 NUL 终止（这两点曾分别导致"引导器解析错位"和"文件名被追加多余字符"两类故障，已修）。
 2. **冻结环境探针**：在 exe 内逐项验证 `ssl / hashlib / tkinter(8.6.15) / PIL / PIL.ImageTk / pystray / app_logger /
-   config_store / ocr_helper / portal_client / autostart / numpy(2.5.4) / onnxruntime / ddddocr` 全部可导入；
-   `OcrEngine.available() == True`。
+   config_store / ocr / ocr_helper / portal_client / autostart / numpy(2.5.4) / onnxruntime / ddddocr` 全部可导入；
+   OCR 可用性经 `app.build_ocr_engine(cfg).available()`（解耦前为 `OcrEngine.available()`）确认为 True。
 3. **协议闭环终验**（不弹窗）：把 exe 复制到临时目录，配一份指向本机模拟门户的 `config.json`，跑 `--silent`：
    `rc=0`（4.0s），门户依次收到 `GET /logoff → GET /login → GET /CheckCode → GET /logoff → POST /login`，
    门户状态转为在线 → 说明 **HTTP/会话/验证码/ddddocr 识别/配置读取**在冻结环境里全部工作。

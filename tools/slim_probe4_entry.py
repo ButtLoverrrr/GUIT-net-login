@@ -1,12 +1,15 @@
 '''程序入口：原生 GUI（仿「联网设置」布局） + --silent 静默登录模式。
 
+用途：诊断探针入口（配合 build_slim_exe.py --probe 使用），是 app.py 的诊断变体——
+在 run_silent() 前后额外写 diag.log，用于在冻结环境里定位「登录没提交」这类问题。
+
+OCR：已解耦为可插拔接口（src/ocr.py），因此这里用 `ocr.create_engine(cfg)` 装配，
+不再直接构造默认实现 `ocr_helper.OcrEngine`（与 app.build_ocr_engine 语义一致）。
+
 用法：
     GUIT-net-login.exe              打开界面（默认）
     GUIT-net-login.exe --silent     无窗口静默登录，结果用系统提示框反馈
     GUIT-net-login.exe --console    保留控制台输出（开发调试用）
-
-界面元素对照用户需求（docs/PLAN.md 第 1 节）：
-学号 / 上网密码 / 记住密码 / 开机自动登录 / 验证码 / 连接 / 隐藏 / 退出 / 日志区。
 '''
 
 import argparse
@@ -76,7 +79,7 @@ except Exception:
 import autostart
 from app_logger import Logger
 from config_store import (app_dir, has_credential, load_config, remove_config, save_config)
-from ocr_helper import OcrEngine
+from ocr import create_engine
 from portal_client import (KIND_CAPTCHA, KIND_NEED_MANUAL, LoginSession, PortalError, auto_login)
 APP_VERSION = '1.0.0'
 
@@ -146,7 +149,7 @@ def run_silent() -> int:
         logger.warn('未配置账号，转入界面模式')
         return 3
     try:
-        result = auto_login(cfg, logger, OcrEngine())
+        result = auto_login(cfg, logger, create_engine(cfg))
         _diag('auto_login -> ok=%s kind=%s msg=%s' % (result.ok, result.kind, result.message))
     except Exception as _exc:
         import traceback as _tb
@@ -167,7 +170,7 @@ class LoginApp:
     def __init__(self, root: tk.Tk, auto_connect: bool=False):
         self.root = root
         self.cfg = load_config()
-        self.ocr = OcrEngine()
+        self.ocr = create_engine(self.cfg)
         self.session = None
         self.busy = False
         self.auto_connect = auto_connect

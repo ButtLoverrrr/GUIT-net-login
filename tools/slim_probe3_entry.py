@@ -1,4 +1,9 @@
-"""诊断探针 v3：在冻结 exe 内直接调用应用的静默流程，输出配置/会话/结果。"""
+"""诊断探针 v3：在冻结 exe 内直接调用应用的静默流程，输出配置/会话/结果。
+
+OCR 已解耦为可插拔接口（见 src/ocr.py 与 docs/ocr-interface.md），因此本探针
+不再直接构造 `ocr_helper.OcrEngine()`，改走正式装配入口 `app.build_ocr_engine(cfg)`
+——与 `--silent` 走的是同一条装配路径，顺带报告装配到的后端名。
+"""
 import os
 import sys
 import traceback
@@ -17,8 +22,9 @@ def w(msg):
 
 
 try:
+    import app
     import config_store
-    import ocr_helper
+    import ocr
     import portal_client
 
     w('app_dir = %r' % config_store.app_dir())
@@ -46,12 +52,19 @@ try:
         w('needs_login -> %r' % sess.needs_login())
     except Exception:
         w('needs_login raised:\n%s' % traceback.format_exc())
-    try:
-        w('OcrEngine.available -> %r' % ocr_helper.OcrEngine().available())
-    except Exception:
-        w('OcrEngine raised:\n%s' % traceback.format_exc())
 
-    import app
+    # 正式装配入口（接口层 src/ocr.py）：与 run_silent() 同一份配置。
+    try:
+        engine = app.build_ocr_engine(cfg)
+        w('ocr backend = %r' % (getattr(engine, 'name', ''),))
+        w('ocr available -> %r' % engine.available())
+    except Exception:
+        w('ocr engine raised:\n%s' % traceback.format_exc())
+    try:
+        w('available backends -> %r' % (ocr.available_backends(),))
+    except Exception:
+        w('available_backends raised:\n%s' % traceback.format_exc())
+
     try:
         w('run_silent -> %r' % app.run_silent())
     except Exception:

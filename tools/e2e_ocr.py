@@ -29,6 +29,12 @@ appmod.load_config = lambda: json.loads(json.dumps(cfg))
 lines = []
 appmod.toast = lambda *a, **k: None
 
+# OCR 可用性走正式装配入口（OCR 已解耦为可插拔接口，见 src/ocr.py 与
+# docs/ocr-interface.md）：这里必须与 run_silent() 用**同一份配置**，
+# 否则报告里的 ocr_available 与真实登录路径可能不是同一个后端。
+_ocr_cfg = json.loads(json.dumps(cfg))
+ocr_engine = appmod.build_ocr_engine(_ocr_cfg)
+
 t0 = time.time()
 rc = appmod.run_silent()
 dt = time.time() - t0
@@ -40,7 +46,8 @@ report = {
     'portal_online_after': portal.state.online,
     'login_posts': portal.state.login_posts,
     'requests': [(m, p) for m, p, _f in portal.state.requests],
-    'ocr_available': appmod.OcrEngine().available(),
+    'ocr_backend': getattr(ocr_engine, 'name', ''),
+    'ocr_available': ocr_engine.available(),
 }
 print('E2E ' + json.dumps(report, ensure_ascii=False), flush=True)
 for m, p, f in portal.state.requests:

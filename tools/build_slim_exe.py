@@ -10,8 +10,13 @@ write a new PKG (same CArchive format) that
 实测（2026-10-14，基底为 v1.0.14 的 full exe 85,643,184 字节）：
   用户已有精简版（只去 cv2 + 2 个 PIL 扩展）          47.71 MiB
   本工具默认配方（再裁 PKG/PYZ 死重量，OCR 行为不变）   45.29 MiB
-  验证：包内 OcrEngine.available() 为 True；对 120 张固定样本的包装输出与
+  验证：包内 OCR 引擎 available() 为 True；对 120 张固定样本的包装输出与
         full 版逐张一致（差异 0）；GUI 冒烟通过（窗口/单实例端口/正常退出）。
+
+**第一方模块表（PYZ_MODULES）**：OCR 解耦后接口层是 `src/ocr.py`、默认实现是
+`src/ocr_helper.py`，两者都必须重编译进 PYZ；只替换 ocr_helper 会让精简产物
+在 `import ocr` 时失败（入口脚本 app.py 依赖它）。新增第一方模块时同步更新本表，
+`tests/test_ocr_decoupling.py` 有对应的静态断言。
 
 **不可删除的实测教训**（改排除表前请先读）：
   * `numpy.libs\\*`（openblas）删掉后 numpy 直接导入失败——`_multiarray_umath.pyd`
@@ -48,7 +53,9 @@ TOC_FMT = '!IIIIBc'
 TOC_LEN = struct.calcsize(TOC_FMT)
 
 ENTRY = 'app'                                                  # PKG entry script (name must stay)
-PYZ_MODULES = ('portal_client', 'config_store', 'ocr_helper', 'app_logger', 'autostart')
+# 第一方模块（PYZ 内）必须与 src 当前布局一致：OCR 解耦后新增 src/ocr.py（接口层），
+# 漏了它 → 精简产物里 app 的 `from ocr import ...` 直接 ImportError（连窗口都开不出来）。
+PYZ_MODULES = ('portal_client', 'config_store', 'ocr', 'ocr_helper', 'app_logger', 'autostart')
 
 # ---- PKG 层排除 ----
 # 前缀排除：整个 OpenCV（OCR 路径不访问 cv2 属性，由 src/ocr_helper.py 的 cv2 桩兜底）

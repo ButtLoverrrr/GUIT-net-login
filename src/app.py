@@ -76,7 +76,7 @@ except Exception:
 import autostart
 from app_logger import Logger
 from config_store import (app_dir, has_credential, load_config, remove_config, save_config)
-from ocr import OcrBackend, create_engine
+from ocr import OcrBackend, create_engine, safe_available, safe_classify
 from portal_client import (KIND_CAPTCHA, KIND_NEED_MANUAL, LoginSession, PortalError, auto_login)
 APP_VERSION = '1.0.0'
 
@@ -703,11 +703,12 @@ class LoginApp:
         '''是否启用自动识别：`options.useOcr` 开启且所选引擎（见 ocr.py 契约）可用。
 
         注意：首次调用会触发引擎初始化（ddddocr 约 1~2 秒），因此只应在后台线程中调用。
+        引擎违反契约抛异常时按「不可用」处理（回退手输），不能让它顶掉整个流程。
         '''
 
         if not bool((self.cfg.get('options') or {}).get('useOcr', True)):
             return False
-        return self.ocr.available()
+        return safe_available(self.ocr)
 
     def _on_connect(self) -> None:
         if self.busy:
@@ -755,7 +756,7 @@ class LoginApp:
             return
         for attempt in range(1, max_retry + 1):
             png = self.session.prepare()
-            guess = self.ocr.classify(png)
+            guess = safe_classify(self.ocr, png)
             self._post('captcha', png, guess)
             if not guess:
                 self._post('info', '自动识别失败，请输入验证码后再次点击「连接」')
@@ -797,7 +798,7 @@ class LoginApp:
         try:
             self._ensure_session()
             png = self.session.prepare()
-            guess = self.ocr.classify(png) if self._use_ocr() else ''
+            guess = safe_classify(self.ocr, png) if self._use_ocr() else ''
             self._post('captcha', png, guess)
         except PortalError as exc:
             self._post('error', str(exc))
@@ -870,7 +871,7 @@ class LoginApp:
                     self._post('info', '已获取注销验证码，请输入后再次点击「断开网络」')
                     self._post('done', False, '')
                     return
-                guess = self.ocr.classify(png)
+                guess = safe_classify(self.ocr, png)
                 if not guess:
                     self._post('info', '自动识别失败，请输入验证码后再次点击「断开网络」')
                     self._post('done', False, '')
@@ -910,7 +911,7 @@ class LoginApp:
             needs_login = self.session.needs_login()
             png = self.session.prepare()
             use_ocr = self._use_ocr()
-            guess = self.ocr.classify(png) if use_ocr else ''
+            guess = safe_classify(self.ocr, png) if use_ocr else ''
             engine_state = '可用' if use_ocr else '不可用（仅手输）'
             self.logger.info('验证码已获取；OCR 引擎 %s' % engine_state)
             self._post('captcha', png, guess)

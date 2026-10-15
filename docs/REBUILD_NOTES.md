@@ -1,9 +1,15 @@
 # 重建工程说明（反编译 → 可运行 → 可测）
 
+> **版本说明**：本文是 2026-10-13 反编译重建工作线的记录。OCR 解耦（2026-10-15）后
+> 第一方模块多了接口层 `src/ocr.py`，当前调用链是
+> `app / portal_client → ocr → ocr_helper → ddddocr`（见 `docs/ocr-interface.md`）；
+> 下面「第一方模块」列表是当时的基线，不在其中新增 `ocr` 以免混淆历史比对。
+
 ## 目标程序
 `<本机路径>
 - PyInstaller 6.x **onefile**，内嵌 **CPython 3.13**（`python313.dll`，pyc magic `f30d0d0a`）
 - 第一方模块（PYZ 内）：`app`、`portal_client`、`config_store`、`ocr_helper`、`app_logger`、`autostart`
+  （解耦后另有 `ocr`；当前重打包清单见 `tools/build_slim_exe.py` 的 `PYZ_MODULES`）
 - 第三方：`PIL 12.3`、`numpy 2.5.4`、`opencv(cv2) 5.0.0`、`onnxruntime 1.31`、`ddddocr 1.6.1`、`pystray`
 - 程序功能：tkinter 单窗口「联网设置」（学号/账号/密码/验证码 + 连接/断开/隐藏/退出 + 日志区 + 托盘），
   后端对 `http://10.6.6.6` 的 ASP.NET WebForms 门户做登录/注销，验证码用 ddddocr 识别；
@@ -58,6 +64,10 @@ cd <本机路径>
 
 ### app_logger.py / ocr_helper.py / autostart.py
 11. 仅行号类噪声，无已知语义问题。
+
+### ocr.py（OCR 接口层，解耦时新增）
+12. 不在反编译基线内，不参与 `fidelity.py` 的逐指令比对；其契约、装配与配置
+    类型安全由 `tests/test_ocr_decoupling.py` 覆盖（见 `docs/ocr-interface.md`）。
 
 ## 硬约束（务必遵守）
 - **公开接口冻结**：`portal_client.{PortalError,LoginResult,PortalStatus,PortalClient,LoginSession,auto_login,KIND_*,auto_login,HIDDEN_FIELDS,ONLINE_PROBES}`、

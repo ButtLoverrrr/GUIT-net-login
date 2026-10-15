@@ -1203,3 +1203,131 @@ CI 构建的 slim 会随 Release 一起发布（三资产：lite / slim / full�
 **注意**：新用例一开始在测试进程里调用了默认后端的 `available()`，把真 ddddocr /
 onnxruntime / cv2 拉进了测试进程，导致同进程后续用例（silent）与 perf 子进程受扰而失败；
 改为只做契约断言（不触发真实引擎）后恢复全绿——测试里不要顺手初始化重引擎。
+
+## 2026-10-15 17:40 OCR 解耦收尾：精简重打包纳入 ocr.py、工具迁移、配置类型保护与回归测试
+
+**背景**：`5afdec2` 把 OCR 解耦为可插拔接口（`src/ocr.py` 定契约、`src/ocr_helper.py`
+是默认实现、`app.build_ocr_engine(cfg)` 是唯一装配点）。解耦后在打包、工具与
+配置健壮性上留下 6 处收尾问题，本次逐条处理；**未改动无关业务**。
+
+**修复清单**
+
+| # | 问题 | 改动 |
+| --- | --- | --- |
+| 1 | 精简重打包 `PYZ_MODULES` 未含 `ocr` | `tools/build_slim_exe.py`：加入 `ocr`（`ocr_helper` 保留），文件头与清单处注明「漏收会让产物 `import ocr` 直接失败」 |
+| 2 | `tools/e2e_ocr.py` 调用已移除的 `app.OcrEngine` | 改为 `app.build_ocr_engine(cfg)`（与 `run_silent()` 同一份配置），报告新增 `ocr_backend` 字段，保留 `ocr_available` |
+| 3 | `docs/ocr-interface.md` 声称「新增模块即可」但 `_LOADERS` 里没有它 | 收严为**显式惰性加载表**：自定义后端必须在 `_LOADERS` 登记；文档写明 `--hidden-import` 只负责打进包、不负责运行时导入，模块须在导入时自注册 |
+| 4 | `backend_name_of()` 对 `cfg` / `options` / `ocrBackend` 类型不安全（非字符串会 `.strip()` 抛异常） | `src/ocr.py`：逐层类型保护；非法类型 → `none`（**不**回退默认 ddddocr，避免手改错类型时意外拉起重引擎）；空串/空白 → 视为未配置取默认；`useOcr=False` 语义不变 |
+| 5 | 工具与结构分析仍停在旧接口 | `tools/analyze.py` 模块清单与跨模块边加入 `ocr`；`tools/fidelity.py` 注明只对照反编译基线（故不含 `ocr`）；`probe_bench/probe_fastfail/verify_backend_claims/slim_probe_entry` 的模块清单补 `ocr`；`tools/slim_probe3_entry.py`、`tools/slim_probe4_entry.py` 迁移到 `build_ocr_engine` / `create_engine`；`tools/README.md` 增「工具与 OCR 解耦的关系」表，逐项标注用途。**没有删除任何工具或测试** |
+| 6 | 异常隔离边界不一致（第三方后端违反契约抛异常时，静默模式会崩、GUI 报「内部错误」） | `src/ocr.py` 新增契约兜底 `safe_available()` / `safe_classify()`（异常与非 str 返回值都收敛）；`app.py` 5 处调用点（`_use_ocr` / `_auto_flow` / `_refresh_worker` / `_logoff_worker` / `_prefetch_worker`）与 `portal_client.auto_login()` 全部改走它们 → 统一回退「手动输入验证码」，不吞 `PortalError`、不误报网络错误 |
+
+**文档**：`docs/STRUCTURE.md`（顶部标注历史基线与当前调用链 `app/portal_client → ocr → ocr_helper → ddddocr`、
+跨模块边补 `app → ocr`）、`docs/PACKAGING.md`（模块数与装配入口同步并标注历史数字未重测）、
+`docs/REBUILD_NOTES.md`（说明 `ocr.py` 不在反编译基线内、不参与逐指令比对）、
+`docs/ocr-interface.md`（配置类型保护矩阵 + `_LOADERS` 登记要求 + 契约约束）。
+
+**新增测试**：`tests/test_ocr_decoupling.py`（16 项，`tests/run_tests.py` 新增 `ocr` 入口）
+覆盖：脏配置/非 dict options/非字符串 `ocrBackend` 不崩且语义明确、脏配置不装配默认后端（无副作用）、
+`_LOADERS` 登记的模块被真正导入并自注册、未登记名字不 import 任何模块、导入失败/模块自炸/工厂炸
+一律降级 `NullBackend`、`safe_*` 收敛异常与错类型、`auto_login` 对坏后端回退手需且不误报网络错误、
+GUI `_use_ocr()` 对坏后端判为不可用、`build_slim_exe.py` 的 `PYZ_MODULES` 含 `ocr` 且源文件存在、
+`analyze.py` 清单含 `ocr`、工具里不再调用已移除的 `app.OcrEngine`、`app` 不再导出 `OcrEngine`。
+测试要求均已满足：import 阶段不初始化真实 ddddocr，不加载 onnxruntime/cv2/numpy，
+用桩对象替代真实 OCR，且用例保存/还原 `_BACKENDS` / `_LOADERS` / `sys.path`。
+
+**静态检查（本次实际执行）**
+
+- `python -I -c "ast.parse(...)"`：`src/`、`tools/`、`tests/` 全部 Python 文件解析通过（0 失败）；
+- `python -I -m py_compile src/ocr.py src/ocr_helper.py src/app.py src/portal_client.py tools/e2e_ocr.py tools/build_slim_exe.py tools/analyze.py tests/test_ocr_decoupling.py`：退出码 0；
+- 接口层静态自检（只 import `src/ocr.py`，不初始化引擎）：配置矩阵 16 例全部符合预期
+  （`MATRIX_BAD = 0`），`create_backend('unknown')`/脏配置 → `NullBackend`，
+  `safe_available`/`safe_classify` 对异常与 `None` 返回值均收敛；
+  自检后 `ddddocr`/`onnxruntime`/`cv2`/`numpy` **均未被导入**；
+- 打包/工具清单静态断言：`PYZ_MODULES = ['portal_client','config_store','ocr','ocr_helper','app_logger','autostart']`，
+  各模块源文件均存在；`analyze.py MODULES` 含 `ocr`；
+- OCR 残留搜索 `appmod.OcrEngine|from app import OcrEngine|app.OcrEngine`：仅命中
+  `tests/test_ocr_decoupling.py` 内的**检查断言本身**，工具与业务代码无残留；
+- `git diff --check`：退出码 0（改动文件统一 CRLF、UTF-8 无 BOM、结尾单个换行）。
+
+**未执行（static-only 约束，未批准）**
+
+- 未运行 `tests/run_tests.py`（含新增用例）——需要跑测试进程；
+- 未执行 `scripts/build.ps1` / `tools/build_slim_exe.py` 重打包——需要 PyInstaller 与本机 venv 的
+  ddddocr/onnxruntime 环境；
+- 故**不存在**「精简产物已实测可加载 `ocr`」的结论：`PYZ_MODULES` 只做了静态断言。
+  批准后建议：`& .venv\Scripts\python.exe tests\run_tests.py all`，
+  再 `pwsh -NoProfile -File scripts\build.ps1`，最后用 `tools\slim_probe3_entry.py`
+  作 `--probe` 入口确认包内 `ocr backend = 'ddddocr'`、`ocr available -> True`。
+
+**回滚点**：本次改动未提交；`git checkout 5afdec2 -- <文件>` 即回到解耦后的原始状态。
+## 2026-10-15 18:20 OCR 解耦收尾：动态验证完成（测试 + 构建 + 产物探针 + 闭环）
+
+以上 17:40 那节的静态结论已按用户批准补齐动态验证，实测结果如下；**结论以本节为准**。
+
+**1) 测试（.venv\Scripts\python.exe tests\run_tests.py ocr / all）**
+
+| 项 | 结果 |
+| --- | --- |
+| `ocr`（本次新增用例） | **17/17 通过**（首跑 15/17，两条断言写错已修，见下「修过的测试自身问题」） |
+| `all`（后端 + OCR + 前端 + 静默 + 布局 + 单实例 + 性能） | **82 通过 / 2 失败** |
+| 失败项 | `test_perf.test_cold_start_import_time`（0.2268s > 门槛 0.206s）、`test_perf.test_ui_ready_time`（0.2597s > 门槛 0.168s） |
+
+两处 `test_perf` 失败**与本改动无关**，证据为只读 A/B 对照（`git archive HEAD src` 导出解耦后基线到临时目录，
+与当前工作区各冷启动 5 次测 `import app`）：
+
+| 版本 | 样本（s，`app`+`portal_client`） | 中位数 |
+| --- | --- | --- |
+| A = HEAD `5afdec2` | 0.265 / 0.284 / 0.289 / 0.366 / 0.396 | 0.2888 |
+| B = 当前工作区 | 0.227 / 0.231 / 0.235 / 0.250 / 0.291 | **0.2353** |
+
+即改动后导入**更快**，且 `tests/perf_baseline.json` 记录的门槛（0.0848 / 0.0546）来自
+`tools/py313` 解释器，本机实测区间（0.227~0.396s）本就超出阈值——与 `5afdec2` 提交说明里
+「唯一失败项 `test_perf.test_ui_ready_time` 经 `git stash` 对照确认为改动前同样失败」一致。
+
+**修过的测试自身问题**（都是新用例的断言写错，不是产品缺陷）：
+
+1. `ocrBackend = None` 被我误列为「非法类型」——它的语义等于「键未配置」，本就该取默认后端；
+   已从「脏配置不装配默认后端」用例中移出，并新增反向护栏
+   `test_default_backend_still_selected_when_config_is_silent`（缺省配置必须装配默认后端，
+   防止类型保护被做成「谁都不用」）。
+2. `{'options': 'bad'}`、`cfg=None` 同理（`options` 非 dict → 按空配置 → 默认后端）；
+   校验「非法值不碰默认后端工厂」的用例现只含数字 / 列表 / 对象 / 浮点 / 布尔。
+
+**2) 构建（pwsh -NoProfile -File scripts\build.ps1）**
+
+- 退出码 **0**；PyInstaller 基础构建 82.1 MB → 清单校验**全绿**
+  （`[通过] 必须存在：ocr`、`[通过] 必须存在：ocr_helper`、闲置模型与 FFmpeg 全不在）；
+- 精简重打包日志确认第一方模块全部重编译：
+  `recompiled : app + portal_client, config_store, ocr, ocr_helper, app_logger, autostart`
+  （PYZ 744 → 423 模块，`build\GUIT-net-login.exe` = 47,510,093 字节 / **45.31 MiB**，自校验 OK）；
+- 这是本轮**修复问题①的直接实证**：`ocr` 确实被替换进 PYZ，而非只写在清单里。
+
+**3) 冻结产物探针（tools\build_slim_exe.py --probe）**
+
+- 注：原计划用 `tools\slim_probe3_entry.py` 当探针入口**不可行**——`--probe` 会替换入口脚本，
+  而 PYZ 里没有 `app` 模块，它 `import app` 必然 `ModuleNotFoundError: No module named 'app'`
+  （该限制先于本次改动存在，不是本次引入）；`tools\verify_slim_exe.py` / `tools\final_check.py`
+  不受影响。探针改用只依赖 `ocr` / `config_store` 的临时入口；
+- 包内实测：
+  `import ocr OK` / `import ocr_helper OK` / `import config_store OK` / `import portal_client OK`；
+  `create_engine('ddddocr') -> OcrEngine`、`create_engine('none') -> NullBackend`、
+  `create_engine('ghost') -> NullBackend`、`default backend name = 'ddddocr'`、
+  **`default backend available -> True`**、`safe_available / safe_classify -> True / ''`；
+- 探针里**裸 `import ddddocr` 失败是预期的**：精简包已删 cv2（ddddocr 顶层 `import cv2` 报
+  `OpenCV导入失败`）。正常路径由 `ocr_helper._ensure_cv2_shim()` 先装按需报错的 cv2 桩再导入
+  ddddocr，因此 `create_engine('ddddocr')` 与 `available()` 均正常——这正是本次要确认的点。
+
+**4) 真实产物端到端闭环（build\GUIT-net-login.exe + 本地模拟门户）**
+
+| 项 | 实测 |
+| --- | --- |
+| 退出码 | **0** |
+| 门户收到请求 | `GET /logoff → GET /login → GET /CheckCode → GET /logoff → POST /login` |
+| `login_posts` | 1（**真的提交了登录**，不是「无需登录」短路） |
+| 门户状态 | 提交后转为在线 |
+| 结论 | **PASS**：冻结 exe 内 OCR 装配 + HTTP/会话/验证码/配置 + 登录闭环全部可用 |
+
+**仍未验证**：无 Python 环境（干净机器）实测；真实校园网账号/真实验证码准确率；
+托盘图标可见性与 GUI 内容级交互（沿用人工验证项）。
+
+**临时产物**：探针与闭环均在 `%TEMP%` 下的一次性目录内完成，已清理；仓库 `build\` 为 gitignore 目录。

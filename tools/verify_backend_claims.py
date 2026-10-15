@@ -20,8 +20,9 @@ import support        # noqa: E402
 sb = support.Sandbox(tempfile.mkdtemp(prefix='verify-'))
 sb.install()
 
-# 关键：把 TARGET 提到 sys.path 最前并清掉已加载的模块，确保测的是 TARGET 的实现
-for _m in ('portal_client', 'config_store', 'autostart', 'ocr_helper', 'app_logger'):
+# 关键：把 TARGET 提到 sys.path 最前并清掉已加载的模块，确保测的是 TARGET 的实现。
+# 'ocr' 是 OCR 接口层（portal_client 直接依赖它），'ocr_helper' 是默认实现。
+for _m in ('portal_client', 'config_store', 'autostart', 'ocr', 'ocr_helper', 'app_logger'):
     sys.modules.pop(_m, None)
 while PROJ in sys.path:
     sys.path.remove(PROJ)

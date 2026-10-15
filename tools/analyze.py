@@ -12,7 +12,9 @@ from collections import OrderedDict, defaultdict
 ROOT = r'<本机路径>'
 MAR = os.path.join(ROOT, 'work', 'marshal')
 OUT = os.path.join(r'<本机路径>', 'docs', 'STRUCTURE.md')
-MODULES = ['app', 'portal_client', 'config_store', 'ocr_helper', 'app_logger', 'autostart']
+# 第一方模块清单。OCR 解耦后新增接口层 ocr.py，必须一并分析，否则结构报告会漏掉
+# app -> ocr -> ocr_helper 这条新调用链（见 docs/ocr-interface.md）。
+MODULES = ['app', 'portal_client', 'config_store', 'ocr', 'ocr_helper', 'app_logger', 'autostart']
 
 
 def walk(co, path, acc):
@@ -83,6 +85,10 @@ for mod, funcs in inventory.items():
 KNOWN = {
     'portal_client': {'LoginSession', 'PortalClient', 'auto_login', 'PortalError', 'LoginResult', 'PortalStatus'},
     'config_store': {'load_config', 'save_config', 'remove_config', 'has_credential', 'app_dir', 'config_path'},
+    # OCR 接口层（新调用链）：业务代码只依赖这里的契约与装配函数
+    'ocr': {'OcrBackend', 'NullBackend', 'register_backend', 'available_backends',
+            'create_backend', 'backend_name_of', 'create_engine', 'safe_available', 'safe_classify'},
+    # 默认实现（ddddocr）：只有实现专项测试与历史字节码仍直接引用 OcrEngine
     'ocr_helper': {'OcrEngine'},
     'app_logger': {'Logger'},
     'autostart': {'is_enabled', 'enable', 'disable', 'ensure_current', 'read_lnk', 'startup_dir'},
@@ -102,7 +108,7 @@ for mod, funcs in inventory.items():
     lines.append('')
 
 lines += ['## 关键流程的事实依据（从字节码提取的字符串/常量）', '']
-for mod in ('app', 'portal_client', 'config_store', 'autostart', 'ocr_helper'):
+for mod in ('app', 'portal_client', 'config_store', 'autostart', 'ocr', 'ocr_helper'):
     co = marshal.loads(open(os.path.join(MAR, mod + '.marshal'), 'rb').read())
     lines += [f'### {mod}', '']
     for path, c in walk(co, mod, []):

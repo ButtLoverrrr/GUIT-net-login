@@ -16,6 +16,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+
+# OCR 只依赖接口契约（src/ocr.py）：本模块不知道背后是 ddddocr 还是别的实现。
+# 走 safe_* 包装是为了隔离「实现方违反契约抛异常」的情况（见 ocr.py 契约兜底一节）。
+from ocr import safe_available, safe_classify
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
 HIDDEN_FIELDS = ('__VIEWSTATE', '__VIEWSTATEGENERATOR', '__VIEWSTATEENCRYPTED', '__EVENTVALIDATION')
 LOGIN_SUCCESS_WORDS = ('联网成功', '登录成功')
@@ -595,8 +599,8 @@ def auto_login(cfg: dict, logger, ocr=None, on_captcha=None) -> LoginResult:
             logger.error(str(exc))
             return LoginResult(False, str(exc), KIND_NETWORK)
         guess = ''
-        if use_ocr and ocr.available():
-            guess = ocr.classify(last_png)
+        if use_ocr and safe_available(ocr):
+            guess = safe_classify(ocr, last_png)
         if on_captcha:
             on_captcha(last_png, guess)
         if not guess:

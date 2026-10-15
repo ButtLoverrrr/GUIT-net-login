@@ -33,7 +33,7 @@ except Exception:
     w('listdir failed:\n%s' % traceback.format_exc())
 
 for mod in ('encodings.utf_8', 'zlib', 'struct', 'ctypes', 'socket', 'ssl', 'hashlib',
-            'tkinter', 'tkinter.constants', 'app_logger', 'config_store', 'ocr_helper',
+            'tkinter', 'tkinter.constants', 'app_logger', 'config_store', 'ocr', 'ocr_helper',
             'portal_client', 'autostart', 'PIL', 'PIL.Image', 'PIL.ImageTk', 'PIL.ImageDraw',
             'pystray', 'numpy', 'onnxruntime', 'ddddocr'):
     try:

@@ -14,6 +14,9 @@ import dis, marshal, os, sys
 ROOT = r'<本机路径>'
 PROJ = sys.argv[1] if len(sys.argv) > 1 else os.path.join(r'<本机路径>', 'guit-net-login')
 MAR = os.path.join(ROOT, 'work', 'marshal')
+# 用途说明（2026-10-15 OCR 解耦后）：与**反编译基线**（work\marshal，未入库）逐指令
+# 比对，因此清单只包含基线里存在的模块——`ocr.py` 是解耦时新增的，基线中不存在，
+# 加进来只会得到「缺少原始 marshal（跳过）」。新增模块的结构检查由 tests 负责。
 MODULES = ['app', 'portal_client', 'config_store', 'ocr_helper', 'app_logger', 'autostart']
 
 SKIP_OPS = {'RESUME', 'CACHE', 'NOP', 'EXTENDED_ARG', 'PRECALL', 'COPY_FREE_VARS', 'MAKE_CELL', 'RETURN_GENERATOR'}
