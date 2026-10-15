@@ -111,6 +111,8 @@ STATUS_ERR_FG = '#c0392b'
 STATUS_INFO_FG = '#6b7c8d'
 AUTO_CONNECT_MAX_ATTEMPT = 3
 AUTO_CONNECT_INTERVAL_MS = 12000
+# 隐藏到托盘后多久检查一次图标是否真的出现（失败则把窗口找回来，见 _verify_tray_visible）
+TRAY_VERIFY_DELAY_MS = 1500
 PROJECT_URL = 'https://github.com/ButtLoverrrr/GUIT-net-login'
 DISCLAIMER = '免责声明：本工具仅为个人便利性网络连接工具，不修改、不破解、不绕过校园网认证与计费机制；账号与密码仅保存在本机（可选），请自行妥善保管。'
 
@@ -569,6 +571,25 @@ class LoginApp:
             self.tray_icon = pystray.Icon('GUIT-net-login', self._tray_image(), '校园网登录', menu)
             threading.Thread(target=self.tray_icon.run, daemon=True).start()
             self.logger.info('已隐藏到系统托盘：双击托盘图标可重新显示')
+            self.root.after(TRAY_VERIFY_DELAY_MS, self._verify_tray_visible)
+
+    def _verify_tray_visible(self) -> None:
+        '''兜底：托盘图标没能出现时把窗口找回来。
+
+        pystray 的默认 setup 在它自己的线程里把 visible 置 True，异常会被那条线程
+        吞掉（exe 无控制台时完全看不到），表现就是「窗口隐藏了、托盘却没图标」，
+        用户既没有界面也没有入口恢复。这里在隐藏后延时检查一次，失败就恢复窗口
+        并在日志里说明，避免陷入死角。
+        '''
+
+        icon = self.tray_icon
+        if icon is None or getattr(icon, 'visible', False):
+            return
+        try:
+            self.root.deiconify()
+        except Exception:
+            pass
+        self.logger.warn('托盘图标未能显示，已恢复窗口（本次隐藏未生效）')
 
     def _tray_show(self, *_args) -> None:
         '''从托盘恢复窗口（回调运行在托盘线程，须切回主线程操作界面）。'''

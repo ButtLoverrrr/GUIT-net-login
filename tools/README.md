@@ -39,5 +39,9 @@
    **排除表改动须知（实测教训）**：`numpy.libs\*`（openblas）是 `_multiarray_umath.pyd`
    的**加载期**依赖，删掉 numpy 直接导入失败；`numpy._core._add_newdocs` 与 `numpy.ma`
    也在 numpy 导入链上。**numpy 的任何子模块都不要加进 PYZ 排除表。**
+   PIL 插件白名单同样要看依赖链：`IcoImagePlugin` 顶部 `from . import BmpImagePlugin`，
+   只留 Ico 而删 Bmp 会让托盘图标创建失败（异常在 pystray 内部线程里被吞掉）。
+   **改动排除表后，必须同时跑三项验证**：① 包内 `OcrEngine.available()` 与固定样本输出；
+   ② 托盘图标可见（`Icon.visible`）；③ GUI 冒烟。
 3. `verify_slim_exe.py` / `slim_probe*_entry.py` 为诊断入口；
    `fidelity.py` 依赖原工作线的 marshal 基线（未入库），仅供参考。

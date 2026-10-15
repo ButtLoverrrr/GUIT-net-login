@@ -1139,3 +1139,31 @@ CI 构建的 slim 会随 Release 一起发布（三资产：lite / slim / full�
 - GUI 冒烟通过（窗口「联网设置 v1.0.0」、单实例端口 47823、正常退出）。
 - `build\` 里的旧 exe（full/lite/slim/精简版）已移至
   `temp\output\backup-20261015\`（环境安全删除守卫拒绝直接删除，改用移动）。
+
+## 2026-10-15 14:05 修复「隐藏按钮失效，不会隐藏到托盘」（我引入的精简回归）
+
+**现象**：点「隐藏」后窗口消失，但托盘里没有图标，用户既看不到界面也没有恢复入口。
+
+**定位过程**（在打包产物内用探针复现，而非只看源码）
+1. 探针走 `_on_hide()` 回读状态：`HAS_TRAY=True`、pystray 后端 `_win32`、
+   窗口 `normal → withdrawn`、图标对象已建、线程存活，但 `tray_icon.visible` 恒为 **False**；
+2. 抓线程异常：pystray 默认 setup 在**它自己的线程**里把 visible 置 True，异常被那条线程吞掉
+   （exe 无控制台时完全不可见）。用 `threading.excepthook` + 自定义 setup 抓到真凶：
+   `KeyError: "ICO"` —— `pystray._win32._update_icon()` → `image.save(format="ICO")`
+   → Pillow `SAVE["ICO"]` 未登记；
+3. 进一步定位：`Image.init()` 逐个 import 插件模块，**`IcoImagePlugin` 顶部
+   `from . import BmpImagePlugin`**，而精简配方把 Bmp 一起删了 → 该 import 抛 ImportError
+   被静默跳过 → ICO 未注册。**根因是精简配方的 PIL 插件白名单缺依赖链，不是 pystray 的问题。**
+
+**修复**
+1. `tools/build_slim_exe.py`：PIL 插件白名单补 `IcoImagePlugin` + `BmpImagePlugin`
+   （附依赖链注释与「改动本表务必跑托盘验证」的提醒）；代价约 +5.7 KB。
+2. `src/app.py` 增加兜底 `_verify_tray_visible()`：隐藏后 1.5s 检查图标是否真的出现，
+   没出现就把窗口找回来并在日志里说明——避免「窗口消失、托盘无图标、找不回来」的死角。
+   （实测在未修复的包上，该兜底正确触发：窗口自动恢复 + 警告。）
+
+**验证**（均为打包产物内实测）
+- 托盘探针：`visible_after_run=True`、`_icon_valid=True`、零异常，`show` 恢复路径正常；
+- OCR 回归：`engine_available=True`、120 张固定样本与基线**逐张一致（差异 0）**；
+- GUI 冒烟：窗口「联网设置 v1.0.0」、单实例端口 47823、正常退出；
+- 产物 47,503,449 字节（45.30 MiB），比修复前 +5.7 KB。

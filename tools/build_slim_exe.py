@@ -80,11 +80,17 @@ PYZ_DROP_PREFIXES = (
     '_pydecimal',
     'asyncio',
 )
-# PIL 只保留 PNG 解码（验证码是 PNG）；其余 *ImagePlugin / *ImageFile 依赖 Image.init()
-# 的容错加载（Pillow 对缺失插件会跳过，不抛错）。
+# PIL 只保留用得到的插件（含依赖链）：
+#   - PngImagePlugin：验证码与图标（assets/app.png）解码；
+#   - IcoImagePlugin：pystray 的 win32 后端用 `image.save(format='ICO')` 生成托盘 HICON；
+#   - BmpImagePlugin：IcoImagePlugin 顶部 `from . import BmpImagePlugin` 依赖它——
+#     只留 Ico 而删 Bmp 时，`Image.init()` 里的 `import PIL.IcoImagePlugin` 会抛 ImportError
+#     并被静默吞掉，于是 SAVE['ICO'] 没登记、托盘图标创建失败（KeyError: 'ICO'），
+#     表现为「窗口隐藏了却没有托盘图标」。实测踩过两次，改动本表务必跑托盘验证。
+# 其余 *ImagePlugin / *ImageFile 依赖 Image.init() 的容错加载（Pillow 对缺失插件会跳过，不抛错）。
 _PIL_PLUGIN_RE = re.compile(r'^PIL\.[A-Za-z0-9_]+ImagePlugin$')
 _PIL_FILE_RE = re.compile(r'^PIL\.[A-Za-z0-9_]+ImageFile$')
-PIL_KEEP_PLUGIN = 'PIL.PngImagePlugin'
+PIL_KEEP_PLUGINS = ('PIL.PngImagePlugin', 'PIL.IcoImagePlugin', 'PIL.BmpImagePlugin')
 
 KEEP_ALL = False
 NO_REPLACE = False
@@ -107,7 +113,7 @@ def pyz_excluded(name):
         return False
     if name.startswith(PYZ_DROP_PREFIXES):
         return True
-    if _PIL_PLUGIN_RE.match(name) and name != PIL_KEEP_PLUGIN:
+    if _PIL_PLUGIN_RE.match(name) and name not in PIL_KEEP_PLUGINS:
         return True
     if _PIL_FILE_RE.match(name):
         return True
