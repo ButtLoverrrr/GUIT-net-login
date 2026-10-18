@@ -25,6 +25,11 @@ Thumbs.db
 # 本地配置与凭据：含明文账号密码，严禁入库（仓库里只保留 config.sample.json）
 config.json
 
+# 自研训练模型：作者私有资产，不入开源仓库。
+# 权重本身与训练数据都不公开，仓库里只留 models/README.md 说明来源与替换方式。
+# 缺少该模型时构建照常成功，程序启动后 crnn 后端不可用，登录验证码自动退回手输。
+models/*.onnx
+
 # 编辑器与 IDE
 .vs/
 .idea/

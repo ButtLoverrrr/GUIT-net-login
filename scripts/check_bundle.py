@@ -260,9 +260,13 @@ RULES = [
     ("required", "res-exact", "onnxruntime/capi/onnxruntime.dll", "ONNX Runtime 核心库"),
     ("required", "res-exact", "onnxruntime/capi/onnxruntime_pybind11_state.pyd", "ONNX Runtime Python 绑定"),
     ("required", "res-exact", "assets/app.ico", "应用图标资源"),
+    # 自研 CRNN 模型（登录页算术验证码）：级别由 resolve_rules() 按本机是否存在决定。
+    # 模型不入开源仓库（作者私有资产），CI/克隆环境没有它，写死 required 会让构建必然失败。
+    ("required", "res-exact", "models/crnn.onnx", "自研 CRNN 模型（登录页算术验证码）"),
     # 必需：识别链路模块
     ("required", "mod", "ocr", "OCR 接口层（业务代码只依赖它的契约）"),
-    ("required", "mod", "ocr_helper", "ddddocr 后端实现（惰性导入，靠 --hidden-import 收进包）"),
+    ("required", "mod", "ocr_crnn", "自研 CRNN 后端（登录页算术题，惰性导入）"),
+    ("required", "mod", "ocr_helper", "ddddocr 后端实现（注销页字母验证码，惰性导入）"),
     ("required", "mod", "ddddocr", "ddddocr 包"),
     ("required", "mod", "ddddocr.compat.v1", "兼容层主类"),
     ("required", "mod", "ddddocr.core.ocr_engine", "OCR 推理引擎"),
@@ -291,6 +295,42 @@ RULES = [
     ("notice", "mod", "ddddocr.__main__", "CLI 入口，GUI 不使用"),
     ("notice", "mod", "ddddocr.charsets", "死代码模块"),
 ]
+
+# 自研 CRNN 模型这条断言的「身份」：(匹配方式, 模式, 说明)。级别由 resolve_rules() 决定。
+CRNN_MODEL_RULE = ("res-exact", "models/crnn.onnx", "自研 CRNN 模型（登录页算术验证码）")
+
+# 脚本在 scripts\ 下，上一级就是项目根
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _with_level(rules, rule, level: str):
+    """把 rules 里指认 rule 的那条断言的级别换成 level，返回新列表。"""
+
+    out = []
+    for r in rules:
+        out.append((level,) + tuple(r[1:]) if tuple(r[1:]) == rule else r)
+    return out
+
+
+def resolve_rules(project_root: Path | None = None):
+    """按项目根是否带自研模型，决定 models/crnn.onnx 这条断言的级别。
+
+    模型不入开源仓库（作者私有资产，见 models/README.md），所以：
+      - 本机有 models/crnn.onnx（本地/私有构建）→ 保持 required：
+        「明明有模型却没被打进包」属于静默降级，必须在构建阶段就失败；
+      - 本机没有（CI、克隆仓库）→ 降为 notice：产物里自然没有它，不该判失败。
+    """
+
+    root = Path(project_root) if project_root is not None else PROJECT_ROOT
+    level = "required" if (root / "models" / "crnn.onnx").exists() else "notice"
+    return _with_level(RULES, CRNN_MODEL_RULE, level)
+
+
+def strict_rules():
+    """自检专用：固定把自研模型当 required，不受本机有没有模型影响（样例是合成的）。"""
+
+    return _with_level(RULES, CRNN_MODEL_RULE, "required")
+
 
 def rule_hits(manifest: Manifest, kind: str, pattern: str):
     if kind == "res-exact":
@@ -360,7 +400,7 @@ def size_summary(manifest: Manifest):
 # --------------------------------------------------------------------------
 # 主流程
 # --------------------------------------------------------------------------
-def check_target(target: str, toc_dir: Path, as_json: Path | None, out=print) -> int:
+def check_target(target: str, toc_dir: Path, as_json: Path | None, out=print, rules=None) -> int:
     out(f"==== 校验 PyInstaller 清单（{target}） ====")
     out(f"清单目录：{toc_dir}")
     try:
@@ -381,7 +421,12 @@ def check_target(target: str, toc_dir: Path, as_json: Path | None, out=print) ->
     for note in manifest.notes:
         out(f"  [注意] {note}")
 
-    rules = RULES
+    # rules 缺省按本机是否带自研模型动态解析；自检传入 strict_rules() 保证结果稳定。
+    rules = rules if rules is not None else resolve_rules()
+    for level, _kind, pattern, _why in rules:
+        if pattern == CRNN_MODEL_RULE[1] and level != "required":
+            out("[说明] 本机无 models/crnn.onnx（私有模型不入库）：该断言降为提示，"
+                "产物不含登录页识别模型")
     failures, notices, lines = run_checks(manifest, rules)
     for tag, text in lines:
         prefix = {"通过": "[通过]", "失败": "[失败]", "提示": "[提示]"}.get(tag, "        ")
@@ -473,11 +518,13 @@ def write_fixture(root: Path, case: str):
             _entry(r"onnxruntime\capi\onnxruntime.dll", r"D:\Dev\.venv\Lib\site-packages\onnxruntime\capi\onnxruntime.dll", "BINARY"),
             _entry(r"onnxruntime\capi\onnxruntime_pybind11_state.pyd", r"D:\Dev\.venv\Lib\site-packages\onnxruntime\capi\onnxruntime_pybind11_state.pyd", "EXTENSION"),
             _entry(r"assets\app.ico", r"D:\Dev 项目\GUIT-net-login\assets\app.ico"),
+            _entry(r"models\crnn.onnx", r"D:\Dev 项目\GUIT-net-login\models\crnn.onnx"),
             _entry(r"gui\_tk_data\中文 图片.gif", r"D:\Dev 项目\assets\中文 图片.gif"),
         ])
         pyz(["ddddocr", "ddddocr.compat.v1", "ddddocr.core.ocr_engine", "ddddocr.models.model_loader",
              "ddddocr.models.charset_manager", "ddddocr.preprocessing.image_processor",
-             "ddddocr.utils.exceptions", "ocr", "ocr_helper", "numpy", "cv2", "onnxruntime", "PIL.ImageTk", "pystray._win32"])
+             "ddddocr.utils.exceptions", "ocr", "ocr_crnn", "ocr_helper", "numpy", "cv2", "onnxruntime",
+             "PIL.ImageTk", "pystray._win32"])
         analysis(["ddddocr", "pystray._win32", "PIL.ImageTk"], [], [], [], [])
         return d, EXIT_PASS
 
@@ -511,10 +558,12 @@ def write_fixture(root: Path, case: str):
             _entry(r"onnxruntime\capi\onnxruntime.dll", "", "BINARY"),
             _entry(r"onnxruntime\capi\onnxruntime_pybind11_state.pyd", "", "EXTENSION"),
             _entry(r"assets\app.ico"),
+            _entry(r"models\crnn.onnx"),
         ])
         pyz(["ddddocr", "ddddocr.compat.v1", "ddddocr.core.ocr_engine", "ddddocr.models.model_loader",
              "ddddocr.models.charset_manager", "ddddocr.preprocessing.image_processor",
-             "ddddocr.utils.exceptions", "ocr", "ocr_helper", "numpy", "cv2", "onnxruntime", "PIL.ImageTk", "pystray._win32"])
+             "ddddocr.utils.exceptions", "ocr", "ocr_crnn", "ocr_helper", "numpy", "cv2", "onnxruntime",
+             "PIL.ImageTk", "pystray._win32"])
         analysis([], [], [], [], [])
         return d, EXIT_ASSERT_FAILED
 
@@ -554,7 +603,8 @@ def selftest(keep_dir: Path | None) -> int:
         d, expected = write_fixture(root, case)
         target = SELFTEST_TARGET[case]
         print(f"---- 样例 {case}（target={target}，期望退出码 {expected}） ----")
-        got = check_target(target, d, None, out=print)
+        # 自检用固定规则：本机有没有自研模型都不影响样例结论（样例清单是合成的）
+        got = check_target(target, d, None, out=print, rules=strict_rules())
         verdict = "符合预期" if got == expected else "与预期不符"
         if got != expected:
             ok = False

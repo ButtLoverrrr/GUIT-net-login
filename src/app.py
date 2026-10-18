@@ -76,21 +76,26 @@ except Exception:
 import autostart
 from app_logger import Logger
 from config_store import (app_dir, has_credential, load_config, remove_config, save_config)
-from ocr import OcrBackend, create_engine, safe_available, safe_classify
+from ocr import (OcrBackend, create_engine, create_logoff_engine,
+                 safe_available, safe_classify)
 from portal_client import (KIND_CAPTCHA, KIND_NEED_MANUAL, LoginSession, PortalError, auto_login)
 APP_VERSION = '1.0.0'
 
 
-def build_ocr_engine(cfg: dict, length: int = 4) -> OcrBackend:
+def build_ocr_engine(cfg: dict, length: int = 4, logoff: bool = False) -> OcrBackend:
     '''按配置装配验证码识别引擎（全程序唯一的装配点）。
 
     界面与登录流程只依赖 `ocr.OcrBackend` 契约（available / classify），
-    具体实现由 `options.ocrBackend` 决定（默认 ddddocr，`none` 表示只用手输）；
-    需要接入别的实现时只在本函数里换装配方式，不动业务代码。
-    测试替换本函数即可注入桩引擎。
+    具体实现由配置决定（`none` 表示只用手输）；接入别的实现只在本函数里换装配
+    方式，不动业务代码。测试替换本函数即可注入桩引擎。
+
+    **登录与注销是两套验证码**（实测）：
+      登录页 /ACaptcha.ashx  算术题 -> `options.ocrBackend`（默认 crnn）
+      注销页 /CheckCode       四位字母 -> `options.logoffOcrBackend`（默认 ddddocr）
+    用错模型必然识别失败，所以这里按 `logoff` 分开装配。
     '''
 
-    return create_engine(cfg, length)
+    return create_logoff_engine(cfg, length) if logoff else create_engine(cfg, length)
 
 def resource_path(name: str) -> str:
     '''资源文件（应用图标等）路径。
@@ -110,7 +115,33 @@ def resource_path(name: str) -> str:
 APP_TITLE = '联网设置'
 DPI_AWARE = True
 WM_CLOSE = 16
+# 验证码显示尺寸。
+# 两个验证码端点原图尺寸差很多，固定倍数会两头不讨好：
+#   /CheckCode       80x24  -> 4 倍 = 320x96   合适
+#   /ACaptcha.ashx  200x60  -> 4 倍 = 800x240  撑满窗口
+# 因此改成「最多放大这么多倍，但不超过上限像素」，由 _captcha_scale() 决定。
 CAPTCHA_ZOOM = 4
+CAPTCHA_MAX_W = 360
+CAPTCHA_MAX_H = 110
+
+
+def _captcha_scale(width: int, height: int):
+    '''按原图尺寸算显示尺寸。
+
+    规则：默认放大 CAPTCHA_ZOOM 倍，但放大后若超出 CAPTCHA_MAX_W/H 就收到上限以内；
+    极大的图允许缩小（下限 0.3 倍，防止缩成看不清的一点）。
+
+        /CheckCode       80x24  -> 320x96   （4 倍原样，未触发上限）
+        /ACaptcha.ashx  200x60  -> 360x108  （4 倍会到 800x240，被收到上限）
+    '''
+
+    if width <= 0 or height <= 0:
+        return (max(1, width), max(1, height))
+    zoom = min(CAPTCHA_ZOOM,
+               CAPTCHA_MAX_W / float(width),
+               CAPTCHA_MAX_H / float(height))
+    zoom = max(zoom, 0.3)
+    return (max(1, int(round(width * zoom))), max(1, int(round(height * zoom))))
 # --- 动画参数（集中控制，设为 0/FALSE 即完全关闭；任何失败都静默降级） ---
 FADE_ENABLED = True
 FADE_STEPS = 10
@@ -160,10 +191,14 @@ def run_silent() -> int:
 class LoginApp:
     '''「联网设置」主窗口。'''
 
-    def __init__(self, root: tk.Tk, auto_connect: bool=False, ocr: OcrBackend=None):
+    def __init__(self, root: tk.Tk, auto_connect: bool=False, ocr: OcrBackend=None,
+                 ocr_logoff: OcrBackend=None):
         self.root = root
         self.cfg = load_config()
         self.ocr = ocr if ocr is not None else build_ocr_engine(self.cfg)
+        # 注销页是四位字母验证码，与登录页的算术题不是一套模型
+        self.ocr_logoff = (ocr_logoff if ocr_logoff is not None
+                           else build_ocr_engine(self.cfg, logoff=True))
         self.session = None
         self.busy = False
         self.auto_connect = auto_connect
@@ -511,7 +546,7 @@ class LoginApp:
         self.lbl_captcha.configure(image=self.photo, text='', width=self.photo.width(), height=self.photo.height())
 
     def _show_captcha(self, png: bytes) -> None:
-        '''显示验证码并放大（门户原图仅 80x24，放大后便于手输）。
+        '''显示验证码，按原图尺寸自适应放大（两个端点原图大小差很多）。
 
         优先用 Pillow 解码：对各式 PNG（灰度、调色板、带透明、非标准 chunk）比
         tkinter 原生解码宽容得多，放大也更平滑；Pillow 不可用时退回 tkinter 原生。
@@ -522,7 +557,7 @@ class LoginApp:
         if HAS_PIL:
             try:
                 with Image.open(io.BytesIO(png)) as im:
-                    size = im.width * CAPTCHA_ZOOM, im.height * CAPTCHA_ZOOM
+                    size = _captcha_scale(im.width, im.height)
                     big = im.convert('RGB').resize(size, Image.LANCZOS)
                 self.photo = ImageTk.PhotoImage(big)
                 self._fit_captcha_label()
@@ -531,7 +566,12 @@ class LoginApp:
                 errors.append('Pillow: %s' % exc)
         try:
             base = tk.PhotoImage(data=base64.b64encode(png).decode('ascii'))
-            self.photo = base.zoom(CAPTCHA_ZOOM) if CAPTCHA_ZOOM > 1 else base
+            # tkinter 只能整数倍缩放；按上限挑一个不超限的倍数
+            z = 1
+            while (z + 1) <= CAPTCHA_ZOOM and base.width() * (z + 1) <= CAPTCHA_MAX_W \
+                    and base.height() * (z + 1) <= CAPTCHA_MAX_H:
+                z += 1
+            self.photo = base.zoom(z) if z > 1 else base
             self._fit_captcha_label()
             return
         except Exception as exc:
@@ -871,7 +911,7 @@ class LoginApp:
                     self._post('info', '已获取注销验证码，请输入后再次点击「断开网络」')
                     self._post('done', False, '')
                     return
-                guess = safe_classify(self.ocr, png)
+                guess = safe_classify(self.ocr_logoff, png)
                 if not guess:
                     self._post('info', '自动识别失败，请输入验证码后再次点击「断开网络」')
                     self._post('done', False, '')

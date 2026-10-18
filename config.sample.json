@@ -1,7 +1,9 @@
 {
+  "_comment": "登录页与注销页是两套不同的验证码：/login 用 /ACaptcha.ashx（算术题，crnn 识别）；/logoff 用 /CheckCode（四位字母，ddddocr 识别）。两项 URL 与后端都不能混用。",
   "portalUrl": "http://10.6.6.6/login",
   "portalHome": "http://10.6.6.6",
-  "captchaUrl": "http://10.6.6.6/CheckCode",
+  "captchaUrl": "http://10.6.6.6/ACaptcha.ashx",
+  "logoffCaptchaUrl": "http://10.6.6.6/CheckCode",
   "submitUrl": "http://10.6.6.6/login",
   "logoffUrl": "http://10.6.6.6/logoff",
   "fields": {
@@ -32,7 +34,8 @@
     "autostart": false,
     "useOcr": true,
     "autoConnect": true,
-    "ocrBackend": "ddddocr"
+    "ocrBackend": "crnn",
+    "logoffOcrBackend": "ddddocr"
   },
   "maxCaptchaRetry": 3,
   "onlineProbe": {

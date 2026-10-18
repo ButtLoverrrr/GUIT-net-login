@@ -43,13 +43,19 @@
 import abc
 import importlib
 
-DEFAULT_BACKEND = 'ddddocr'
+# 登录页与注销页用的是**两套不同**的验证码（实测）：
+#   /login  -> /ACaptcha.ashx  200x60  算术题（如 "98加5"）
+#   /logoff -> /CheckCode       80x24  四位字母数字（如 "EKHW"）
+# 所以默认后端按场景分开，配置项也分开（ocrBackend / logoffOcrBackend）。
+DEFAULT_BACKEND = 'crnn'
+DEFAULT_LOGOFF_BACKEND = 'ddddocr'
 NULL_BACKEND = 'none'
 
 # 名字 → 提供该实现的模块名（首次用到时惰性导入；模块导入时自行注册）。
 # 这是**唯一的惰性加载入口**：不在表里的名字不会去 import 任何模块。
 # 自定义实现必须在这里登记（hidden-import 只解决「打进包」，不解决「加载」）。
 _LOADERS = {
+    'crnn': 'ocr_crnn',
     'ddddocr': 'ocr_helper',
 }
 
@@ -146,15 +152,28 @@ def create_backend(name: str = None, length: int = 4) -> OcrBackend:
         return NullBackend()
 
 
+def _name_from_options(options: dict, key: str, default: str) -> str:
+    '''从 options 里读一个后端名，带完整类型保护。'''
+
+    if not bool(options.get('useOcr', True)):
+        return NULL_BACKEND
+    name = options.get(key)
+    if name is None:
+        return default
+    if not isinstance(name, str):
+        return NULL_BACKEND
+    return name.strip() or default
+
+
 def backend_name_of(cfg: dict = None) -> str:
-    '''从配置里取后端名：`options.ocrBackend`，缺省为 ddddocr。
+    '''登录页用的后端名：`options.ocrBackend`，缺省为 `crnn`（算术验证码）。
 
     类型保护（配置可被手工编辑，任何脏值都不得让程序启动崩溃）：
     - `cfg` 不是 dict → 按空配置处理；
     - `options` 不是 dict → 按空 options 处理；
     - `ocrBackend` 值不是字符串（数字 / 字典 / 列表等）→ 返回 `none`：
-      非法配置**不**回退到默认 ddddocr，避免手改错类型时意外拉起重量级 OCR；
-    - `ocrBackend` 是空串 / 纯空白 → 视为未配置，取默认 `ddddocr`。
+      非法配置**不**回退到默认值，避免手改错类型时意外拉起重量级 OCR；
+    - `ocrBackend` 是空串 / 纯空白 → 视为未配置，取默认 `crnn`。
 
     `options.useOcr` 为 False 时一律当作 none（历史开关，语义等价；缺失默认启用）。
     '''
@@ -162,20 +181,32 @@ def backend_name_of(cfg: dict = None) -> str:
     options = cfg.get('options') if isinstance(cfg, dict) else None
     if not isinstance(options, dict):
         options = {}
-    if not bool(options.get('useOcr', True)):
-        return NULL_BACKEND
-    name = options.get('ocrBackend')
-    if name is None:
-        return DEFAULT_BACKEND
-    if not isinstance(name, str):
-        return NULL_BACKEND
-    return name.strip() or DEFAULT_BACKEND
+    return _name_from_options(options, 'ocrBackend', DEFAULT_BACKEND)
+
+
+def logoff_backend_name_of(cfg: dict = None) -> str:
+    '''注销页用的后端名：`options.logoffOcrBackend`，缺省为 `ddddocr`（字母验证码）。'''
+
+    options = cfg.get('options') if isinstance(cfg, dict) else None
+    if not isinstance(options, dict):
+        options = {}
+    return _name_from_options(options, 'logoffOcrBackend', DEFAULT_LOGOFF_BACKEND)
 
 
 def create_engine(cfg: dict = None, length: int = 4) -> OcrBackend:
-    '''按配置装配识别引擎（业务代码用这一个入口，不关心具体实现）。'''
+    '''装配**登录页**识别引擎（业务代码用这一个入口，不关心具体实现）。'''
 
     return create_backend(backend_name_of(cfg), length)
+
+
+def create_logoff_engine(cfg: dict = None, length: int = 4) -> OcrBackend:
+    '''装配**注销页**识别引擎。
+
+    注销页是四位字母数字，与登录页的算术题不是一套模型，因此单独装配。
+    两者共用同一套注册表与契约，只是名字不同。
+    '''
+
+    return create_backend(logoff_backend_name_of(cfg), length)
 
 
 # ---------------------------------------------------------------------- 契约兜底

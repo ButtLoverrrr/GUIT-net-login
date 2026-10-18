@@ -55,7 +55,10 @@ TOC_LEN = struct.calcsize(TOC_FMT)
 ENTRY = 'app'                                                  # PKG entry script (name must stay)
 # 第一方模块（PYZ 内）必须与 src 当前布局一致：OCR 解耦后新增 src/ocr.py（接口层），
 # 漏了它 → 精简产物里 app 的 `from ocr import ...` 直接 ImportError（连窗口都开不出来）。
-PYZ_MODULES = ('portal_client', 'config_store', 'ocr', 'ocr_helper', 'app_logger', 'autostart')
+# 同理 src/ocr_crnn.py 是登录页算术验证码的后端，漏掉会让 `import ocr` 的惰性加载
+# 拿到旧字节码（改了源码却不生效），表现为「构建成功但识别结果不对」。
+PYZ_MODULES = ('portal_client', 'config_store', 'ocr', 'ocr_crnn', 'ocr_helper',
+               'app_logger', 'autostart')
 
 # ---- PKG 层排除 ----
 # 前缀排除：整个 OpenCV（OCR 路径不访问 cv2 属性，由 src/ocr_helper.py 的 cv2 桩兜底）

@@ -19,37 +19,52 @@ src/ocr.py           契约 + 注册表 + 按配置装配（不 import ddddocr�
   register_backend() 注册实现：factory(length) -> OcrBackend
   create_backend()   按名字装配；未知名字 → NullBackend（安全降级，不打断主流程）
   backend_name_of()  从 config 读 options.ocrBackend（useOcr=False 等价于 none）
-  create_engine()    按配置装配（create_backend(backend_name_of(cfg))）
+  logoff_backend_name_of()  从 config 读 options.logoffOcrBackend（注销页专用）
+  create_engine()    装配登录页引擎（create_backend(backend_name_of(cfg))）
+  create_logoff_engine()    装配注销页引擎
   safe_available()   available() 的安全包装：实现方抛异常 → False
   safe_classify()    classify() 的安全包装：实现方抛异常 → 空串
   _LOADERS           名字 → 实现模块；**唯一的惰性加载入口**
 
-src/ocr_helper.py    默认实现：ddddocr 后端（导入时注册名字 "ddddocr"）
-src/app.py           build_ocr_engine(cfg) —— 全程序唯一装配点；
-                     LoginApp(root, auto_connect, ocr=...) 支持注入（测试/未来替换）
+src/ocr_helper.py    实现：ddddocr 后端（导入时注册名字 "ddddocr"），用于**注销页**字母验证码
+src/ocr_crnn.py      实现：自研 CRNN 后端（导入时注册名字 "crnn"），用于**登录页**算术验证码；
+                     识别整个算式后内部求值，对外只返回答案，业务代码无感
+src/app.py           build_ocr_engine(cfg, logoff=False) —— 全程序唯一装配点，
+                     按场景装配登录/注销两套引擎；
+                     LoginApp(root, auto_connect, ocr=..., ocr_logoff=...) 支持注入（测试/替换）
 portal_client.py     auto_login(cfg, logger, ocr=...) 只按契约调用（鸭子类型）
 ```
 
-调用链：`app` / `portal_client` → `ocr`（契约 + 装配） → `ocr_helper`（默认实现）
-→ `ddddocr`。业务代码不 import `ocr_helper`，也不 import `ddddocr`。
+调用链：`app` / `portal_client` → `ocr`（契约 + 装配） → `ocr_crnn`（登录）或
+`ocr_helper` → `ddddocr`（注销）。业务代码不 import 任何具体实现。
+
+> 为什么分两套：站点登录页是 `/ACaptcha.ashx` 的 **200×60 算术题**，注销页是
+> `/CheckCode` 的 **80×24 四位字母**，同一个模型认不了两种图。所以配置项、URL、
+> 默认后端全部按场景分开（`ocrBackend`/`captchaUrl` 与 `logoffOcrBackend`/`logoffCaptchaUrl`）。
 
 ## 配置
 
 ```json
+"captchaUrl": "http://10.6.6.6/ACaptcha.ashx",          // 登录页：算术题
+"logoffCaptchaUrl": "http://10.6.6.6/CheckCode",        // 注销页：四位字母
 "options": {
-  "useOcr": true,              // 历史总开关；false 一律等价于 ocrBackend = "none"
-  "ocrBackend": "ddddocr"      // 缺省；可选 "none" 或任何已在 _LOADERS 登记的名字
+  "useOcr": true,                 // 历史总开关；false 一律等价于两个后端都为 "none"
+  "ocrBackend": "crnn",           // 登录页，缺省 crnn
+  "logoffOcrBackend": "ddddocr"   // 注销页，缺省 ddddocr
 }
 ```
 
-- `"ddddocr"`：默认，自动识别验证码。
+- `"crnn"`：登录页默认，自研 CRNN，识别算式后内部求值只返回答案。模型在
+  `models/crnn.onnx`（**不入库**，缺失时该后端不可用，自动退回手输）。
+- `"ddddocr"`：注销页默认，直接识别四位字母数字。
 - `"none"`：关闭自动识别，程序只用「手动输入」（与 `useOcr: false` 等价）。
 - 未知名字：安全降级为 `none`，不会让程序报错或卡住。
+- 任一 URL 与后端都**不可混用**：用算术模型去认字母图（或反之）必然识别失败。
 - **配置类型保护**（手改 `config.json` 不会让程序崩）：
   - `cfg` / `options` 不是对象 → 按空配置处理（取默认后端）；
-  - `ocrBackend` 是空串或纯空白 → 视为未配置，取默认 `ddddocr`；
-  - `ocrBackend` 不是字符串（数字、对象、列表等）→ 按 `none` 处理：
-    非法配置**不会**回退到默认 ddddocr，避免手改错类型时意外拉起重量级 OCR。
+  - `ocrBackend` / `logoffOcrBackend` 是空串或纯空白 → 视为未配置，取各自默认值；
+  - 值不是字符串（数字、对象、列表等）→ 按 `none` 处理：
+    非法配置**不会**回退到默认值，避免手改错类型时意外拉起重量级 OCR。
 
 ## 接入自己的实现（`_LOADERS` 是唯一的惰性加载入口）
 

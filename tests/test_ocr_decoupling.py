@@ -56,22 +56,22 @@ def _restore(snap):
 
 # (配置, 期望后端名, 说明)
 BACKEND_NAME_MATRIX = (
-    (None, 'ddddocr', 'cfg 为 None → 按空配置，取默认后端'),
-    ({}, 'ddddocr', '缺 options → 默认后端'),
-    ({'options': None}, 'ddddocr', 'options 为 None → 按空 options'),
-    ({'options': []}, 'ddddocr', 'options 是列表 → 按空 options'),
-    ({'options': 'bad'}, 'ddddocr', 'options 是字符串 → 按空 options'),
-    ({'options': {'ocrBackend': None}}, 'ddddocr', '值缺失/None → 默认后端'),
-    ({'options': {'ocrBackend': ''}}, 'ddddocr', '空串 → 视为未配置，取默认'),
-    ({'options': {'ocrBackend': '   '}}, 'ddddocr', '纯空白 → 视为未配置，取默认'),
+    (None, 'crnn', 'cfg 为 None → 按空配置，取默认后端'),
+    ({}, 'crnn', '缺 options → 默认后端'),
+    ({'options': None}, 'crnn', 'options 为 None → 按空 options'),
+    ({'options': []}, 'crnn', 'options 是列表 → 按空 options'),
+    ({'options': 'bad'}, 'crnn', 'options 是字符串 → 按空 options'),
+    ({'options': {'ocrBackend': None}}, 'crnn', '值缺失/None → 默认后端'),
+    ({'options': {'ocrBackend': ''}}, 'crnn', '空串 → 视为未配置，取默认'),
+    ({'options': {'ocrBackend': '   '}}, 'crnn', '纯空白 → 视为未配置，取默认'),
     ({'options': {'ocrBackend': 123}}, 'none', '值是数字 → 非法配置按 none（不启重引擎）'),
     ({'options': {'ocrBackend': ['ddddocr']}}, 'none', '值是列表 → 非法配置按 none'),
     ({'options': {'ocrBackend': {'name': 'ddddocr'}}}, 'none', '值是对象 → 非法配置按 none'),
     ({'options': {'ocrBackend': 'unknown'}}, 'unknown', '未知字符串照样透传（由装配处降级）'),
-    ({'options': {'ocrBackend': ' ddddocr '}}, 'ddddocr', '两端空白要 strip'),
-    ({'options': {'useOcr': False, 'ocrBackend': 'ddddocr'}}, 'none', 'useOcr=False 一律等价 none'),
+    ({'options': {'ocrBackend': ' crnn '}}, 'crnn', '两端空白要 strip'),
+    ({'options': {'useOcr': False, 'ocrBackend': 'crnn'}}, 'none', 'useOcr=False 一律等价 none'),
     ({'options': {'useOcr': True, 'ocrBackend': 'none'}}, 'none', 'useOcr=True + none → none'),
-    ({'options': {'useOcr': True}}, 'ddddocr', 'useOcr 缺失/True → 默认启用'),
+    ({'options': {'useOcr': True}}, 'crnn', 'useOcr 缺失/True → 默认启用'),
 )
 
 
@@ -144,7 +144,7 @@ def test_default_backend_still_selected_when_config_is_silent():
         calls = []
 
         class _Default:
-            name = 'ddddocr'
+            name = 'crnn'
 
             def __init__(self, length=4):
                 self.CAPTCHA_LENGTH = length
@@ -155,14 +155,14 @@ def test_default_backend_still_selected_when_config_is_silent():
             def classify(self, png):
                 return 'ok'
 
-        ocr.register_backend('ddddocr', (lambda length=4: (calls.append(length), _Default(length))[1]),
+        ocr.register_backend('crnn', (lambda length=4: (calls.append(length), _Default(length))[1]),
                              replace=True)
         for cfg in ({}, None, {'options': None}, {'options': {}},
                     {'options': {'ocrBackend': None}}, {'options': {'ocrBackend': '   '}},
                     {'options': 'bad'}, {'options': {'useOcr': True}}):
             eng = ocr.create_engine(cfg)
             assert isinstance(eng, _Default), (cfg, type(eng))
-            assert eng.name == 'ddddocr' and eng.available() is True, cfg
+            assert eng.name == 'crnn' and eng.available() is True, cfg
         assert len(calls) == 8, f'每个缺省配置都应装配一次默认后端：{calls}'
     finally:
         _restore(snap)
@@ -403,6 +403,7 @@ def test_slim_repack_module_list_includes_ocr():
     assert pyz is not None, 'build_slim_exe.py 里找不到 PYZ_MODULES'
     assert 'ocr' in pyz, f'PYZ_MODULES 必须含接口层 ocr：{pyz}'
     assert 'ocr_helper' in pyz, '默认实现 ocr_helper 不能被删除'
+    assert 'ocr_crnn' in pyz, '登录页 CRNN 后端 ocr_crnn 必须在 PYZ_MODULES（否则改了源码不生效）'
     for mod in pyz:
         src_file = os.path.join(SRC, mod + '.py')
         assert os.path.isfile(src_file), f'PYZ_MODULES 里的 {mod} 没有对应源码：{src_file}'
@@ -448,7 +449,7 @@ def test_app_exports_only_ocr_contract_assembly():
     assert isinstance(none_eng, ocr.NullBackend) and none_eng.available() is False
     default_eng = appmod.build_ocr_engine({'options': {}})
     assert isinstance(default_eng, ocr.OcrBackend)
-    assert default_eng.name == 'ddddocr'
+    assert default_eng.name == 'crnn'
     assert not hasattr(appmod, 'OcrEngine'), 'app 不应再导出 OcrEngine（已迁移到 ocr_helper）'
 
 

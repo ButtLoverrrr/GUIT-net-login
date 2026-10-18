@@ -391,7 +391,11 @@ class PortalClient:
         # 状态取自同一份 HTML，避免为了拿 ViewState 和拿状态而 GET 两次注销页。
         html = self._load_form(self.logoff_url(), '注销页')
         status = self._parse_status(html)
-        captcha = self._request(self.cfg['captchaUrl'])
+        # 注销页下发的是四位字母验证码（/CheckCode），与登录页的算术题
+        # （/ACaptcha.ashx）不是同一张图，所以用独立 URL。
+        # 旧配置没有 logoffCaptchaUrl 时回退到 captchaUrl 保持兼容。
+        captcha = self._request(
+            self.cfg.get('logoffCaptchaUrl') or self.cfg['captchaUrl'])
         if not captcha or captcha[:4] != b'\x89PNG':
             raise PortalError('验证码获取失败（未返回 PNG）')
         self.form_source = 'logoff'

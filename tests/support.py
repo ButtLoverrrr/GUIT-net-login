@@ -243,6 +243,9 @@ class MockPortal:
         cfg['portalUrl'] = b + '/login'
         cfg['portalHome'] = b
         cfg['captchaUrl'] = b + '/CheckCode'
+        # 登录/注销是两套验证码端点，测试环境两个都必须指向 mock，
+        # 否则 prepare_logoff 会去真实站点取码，再拿给 mock 校验（必然失败）
+        cfg['logoffCaptchaUrl'] = b + '/CheckCode'
         cfg['submitUrl'] = b + '/login'
         cfg['logoffUrl'] = b + '/logoff'
         cfg['onlineProbe'] = {'url': b + '/connecttest.txt', 'expect': 'Microsoft Connect Test', 'timeout': 2}

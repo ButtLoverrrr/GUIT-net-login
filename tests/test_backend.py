@@ -450,7 +450,7 @@ def _transport_client(pc, cfg, login_html='', login_status=None, logoff='<html><
     state = {'login_html': login_html, 'login_status': login_status, 'logoff': logoff}
 
     def fake_request(url, data=None, timeout=None):
-        if url == cfg['captchaUrl']:
+        if url == cfg['captchaUrl'] or url == cfg.get('logoffCaptchaUrl'):
             return b'\x89PNG\r\n\x1a\n'
         if url == cfg['logoffUrl']:
             return state['logoff'].encode('utf-8')
@@ -943,9 +943,9 @@ def test_ocr_config_chooses_backend_and_respects_useocr():
     assert ocr.create_engine({'options': {'ocrBackend': 'none'}}).available() is False
     assert ocr.create_engine({'options': {'useOcr': False}}).available() is False
     assert ocr.create_engine({}) is not None, '缺省配置不应炸'
-    assert ocr.backend_name_of({}) == 'ddddocr'
+    assert ocr.backend_name_of({}) == 'crnn'
     assert ocr.backend_name_of({'options': {'ocrBackend': 'none'}}) == 'none'
-    assert ocr.backend_name_of({'options': {'useOcr': False, 'ocrBackend': 'ddddocr'}}) == 'none'
+    assert ocr.backend_name_of({'options': {'useOcr': False, 'ocrBackend': 'crnn'}}) == 'none'
 
 
 def test_ocr_helper_registers_dddocr_backend():
@@ -974,4 +974,4 @@ def test_app_build_ocr_engine_is_the_only_assembly_point():
 
     default_eng = appmod.build_ocr_engine({'options': {}})
     assert isinstance(default_eng, ocr.OcrBackend), '默认后端必须满足契约'
-    assert default_eng.name == 'ddddocr', '默认后端应为 ddddocr 实现'
+    assert default_eng.name == 'crnn', '默认后端应为 crnn 实现'

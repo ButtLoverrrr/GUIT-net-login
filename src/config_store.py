@@ -9,7 +9,11 @@ import json
 import os
 import sys
 CONFIG_FILE_NAME = 'config.json'
-DEFAULT_CONFIG = {'portalUrl': 'http://10.6.6.6/login', 'portalHome': 'http://10.6.6.6', 'captchaUrl': 'http://10.6.6.6/CheckCode', 'submitUrl': 'http://10.6.6.6/login', 'logoffUrl': 'http://10.6.6.6/logoff', 'fields': {'guid': 'ctl00$MainContent$SSOGUITID', 'acc': 'ctl00$MainContent$SSOACC', 'pwd': 'ctl00$MainContent$SSOPWD', 'captcha': 'ctl00$MainContent$TextBoxCC', 'submit': 'ctl00$MainContent$LoginBtn'}, 'submitValue': '登录', 'logoffFields': {'captcha': 'ctl00$MainContent$TextBoxCC', 'submit': 'ctl00$MainContent$LogoffBtn', 'submitValue': '注销'}, 'statusFields': {'ip': 'MainContent_LocalIP', 'online': 'MainContent_LabelOnline'}, 'user': {'guid': '', 'acc': '', 'pwd': ''}, 'options': {'remember': True, 'autostart': False, 'useOcr': True, 'ocrBackend': 'ddddocr'}, 'maxCaptchaRetry': 3, 'onlineProbe': {'url': 'http://www.msftconnecttest.com/connecttest.txt', 'expect': 'Microsoft Connect Test', 'timeout': 4}}
+# 登录页与注销页用的是两套不同的验证码（实测，不是同一张图）：
+#   /login  -> /ACaptcha.ashx  200x60  算术题（"98加5"），由 CRNN 后端识别
+#   /logoff -> /CheckCode       80x24  四位字母数字（"EKHW"），由 ddddocr 识别
+# 因此 URL 与后端都按场景分开配置，避免「用算术模型去认字母」这种必然失败。
+DEFAULT_CONFIG = {'portalUrl': 'http://10.6.6.6/login', 'portalHome': 'http://10.6.6.6', 'captchaUrl': 'http://10.6.6.6/ACaptcha.ashx', 'logoffCaptchaUrl': 'http://10.6.6.6/CheckCode', 'submitUrl': 'http://10.6.6.6/login', 'logoffUrl': 'http://10.6.6.6/logoff', 'fields': {'guid': 'ctl00$MainContent$SSOGUITID', 'acc': 'ctl00$MainContent$SSOACC', 'pwd': 'ctl00$MainContent$SSOPWD', 'captcha': 'ctl00$MainContent$TextBoxCC', 'submit': 'ctl00$MainContent$LoginBtn'}, 'submitValue': '登录', 'logoffFields': {'captcha': 'ctl00$MainContent$TextBoxCC', 'submit': 'ctl00$MainContent$LogoffBtn', 'submitValue': '注销'}, 'statusFields': {'ip': 'MainContent_LocalIP', 'online': 'MainContent_LabelOnline'}, 'user': {'guid': '', 'acc': '', 'pwd': ''}, 'options': {'remember': True, 'autostart': False, 'useOcr': True, 'ocrBackend': 'crnn', 'logoffOcrBackend': 'ddddocr'}, 'maxCaptchaRetry': 3, 'onlineProbe': {'url': 'http://www.msftconnecttest.com/connecttest.txt', 'expect': 'Microsoft Connect Test', 'timeout': 4}}
 
 def app_dir() -> str:
     '''程序所在目录：打包运行时是 exe 所在目录，开发运行时是项目根目录。'''

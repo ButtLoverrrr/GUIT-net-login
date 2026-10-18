@@ -8,9 +8,13 @@
 
 | 文件 | 体积 | 说明 |
 | --- | --- | --- |
-| **`GUIT-net-login.exe`** | 约 45 MB | **单文件，双击即用**，验证码自动识别，基本零输入 |
+| **`GUIT-net-login.exe`** | 约 45 MB | **单文件，双击即用**，验证码自动显示，注销验证码自动识别 |
 
 单个**单文件 exe**，对方电脑不需要安装 Python。
+
+> 登录页验证码是算术题，识别它用到作者自研的 CRNN 模型。该模型**不随仓库开源**，
+> 因此公开构建的 exe 登录时需手动输入算式答案（注销仍自动识别），详见
+> [关于验证码识别模型](#关于验证码识别模型)。
 
 > 打包只做了「去掉程序用不到的东西」：不含 OpenCV、未用的 PIL 图像扩展与死标准库模块；
 > 识别模型与识别行为没有任何改动——120 张固定样本上与未精简构建的输出逐张一致。
@@ -37,8 +41,8 @@ pwsh -NoProfile -File scripts\build.ps1
 
 `build.ps1` 是两段式，最终**只产出一个产物** `build\GUIT-net-login.exe`：
 
-1. PyInstaller 基础构建（精确收集：只收 ddddocr 默认模型，不收闲置模型与 FFmpeg 组件），
-   中间产物放在 `build\_work\` 下；
+1. PyInstaller 基础构建（精确收集：只收 ddddocr 默认模型与 `models\crnn.onnx`（若存在），
+   不收闲置模型与 FFmpeg 组件），中间产物放在 `build\_work\` 下；
 2. 自动调用 `scripts\check_bundle.py` 校验打包清单（必需项必须在、闲置项必须不在，
    不通过即构建失败）；
 3. `tools\build_slim_exe.py` 在基础 exe 上剔除程序用不到的载荷（cv2、未用 PIL 扩展、
@@ -48,7 +52,7 @@ pwsh -NoProfile -File scripts\build.ps1
 
 本仓库另含一轮「反编译 → 修复 → 优化」的完整工程：`tests\`（67 条沙箱用例 + 自建模拟门户）、
 `tools\`（保真度门禁、性能 A/B、精简打包脚本）、`docs\REBUILD_NOTES.md`、`docs\PACKAGING.md`、
-`docs\ocr-interface.md`（验证码识别接口：实现可插拔，默认 ddddocr，可配置更换）、
+`docs\ocr-interface.md`（验证码识别接口：实现可插拔，登录/注销双后端，可配置更换）、
 `reports\完工报告.md`。
 
 ## 自动发布
@@ -59,6 +63,30 @@ pwsh -NoProfile -File scripts\build.ps1
 2. 把新版本号写入 `src/app.py` 的 `APP_VERSION` 常量，界面标题与底部会显示当次版本
 3. 在云端构建单个单文件 exe（构建脚本内部完成「基础构建 → 清单校验 → 精简重打包」）
 4. 打标签并创建 Release，附带该 exe 与自动生成的发布说明（无需本地手工打包上传）
+
+## 关于验证码识别模型
+
+站点的登录页与注销页用的是**两套不同的验证码**，识别方式也不同：
+
+| 页面 | 端点 | 形态 | 识别后端 |
+| --- | --- | --- | --- |
+| 登录 `/login` | `/ACaptcha.ashx` | 200×60 算术题（如 `98加5`） | 自研 CRNN（`crnn`） |
+| 注销 `/logoff` | `/CheckCode` | 80×24 四位字母数字 | `ddddocr` |
+
+登录页那个 CRNN 模型是作者自行训练的（CRNN + CTC，字符集 `0123456789加乘-÷`，
+验证集准确率 91.4%），**属于私有资产，不随本仓库开源**：`models/*.onnx` 已在
+`.gitignore` 中排除，仓库只保留 `models\README.md` 说明输入规格与替换方式。
+
+缺少该模型时不会出错，只会降级：
+
+- `crnn` 后端 `available()` 返回 `False`，登录验证码退回**手动输入答案**；
+- 注销页仍由 `ddddocr` 自动识别，不受影响；
+- `scripts\build.ps1` 跳过 `--add-data models`，构建照常成功；
+- `scripts\check_bundle.py` 把该模型断言从 `required` 降为 `notice`（本机有模型时仍是 `required`，
+  防止「有模型却没打进包」的静默降级）。
+
+想恢复自动识别：把自己训练的模型放到 `models\crnn.onnx`（或用环境变量 `GUIT_CRNN_MODEL`
+指向模型路径），重新构建即可。
 
 ## 开源协议
 

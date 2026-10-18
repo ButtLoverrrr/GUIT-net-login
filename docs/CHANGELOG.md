@@ -2,6 +2,182 @@
 
 格式：`YYYY-MM-DD HH:mm | 操作 | 影响文件 | 验证结果 | 回滚点`
 
+## 2026-10-18 20:20 | 开源化：自研模型移出版本库，构建与清单校验改为「模型可选」
+
+**背景**：仓库是公开的（MIT），但 `models/crnn.onnx` 是作者自行训练的私有资产，不打算开源。
+上一轮改动把模型写成了构建硬依赖（`--add-data models;models` + `check_bundle` 里
+`required models/crnn.onnx`），直接推送会让 CI（无模型）构建必然失败。
+
+**改动**
+
+| 文件 | 内容 |
+|---|---|
+| `.gitignore` | 新增 `models/*.onnx`，仅忽略权重，保留说明文件 |
+| `models/README.md` | **新增**（唯一入库文件）。模型规格（输入 200×64、字符集、准确率）、缺失时的降级行为、自行替换方式、本地构建与公开构建的差别 |
+| `scripts/build.ps1` | 新增 `$CrnnModel` / `$ModelArgs`：模型存在才拼 `--add-data models;models`，缺失时打印黄色提示并继续（PyInstaller 对不存在的 `--add-data` 源目录会直接报错，故必须先判存在） |
+| `scripts/check_bundle.py` | 新增 `CRNN_MODEL_RULE` / `PROJECT_ROOT` / `_with_level()` / `resolve_rules()` / `strict_rules()`；`check_target()` 增加 `rules=` 参数。模型断言级别：本机有 `models/crnn.onnx` → `required`，没有 → `notice` |
+| `scripts/check_bundle.py`（自检） | `full_ok` 样例补 `models\crnn.onnx` 条目与 `ocr_crnn` 模块；`full_missing_model` 补 `ocr_crnn` 与模型条目，使该样例仍只针对 ddddocr 模型缺失；自检固定传 `rules=strict_rules()`，不受本机有无模型影响 |
+| `README.md` | 下载表、构建步骤、文档索引同步；新增「关于验证码识别模型」一节，写明模型未开源、缺模型时的降级与恢复方式 |
+| `docs/ocr-interface.md` | 结构、调用链与配置示例改为双后端（`crnn` / `ddddocr`），补 `logoffOcrBackend` 与双 URL |
+
+**修复的既有缺陷**
+
+`check_bundle.py --selftest` 的 `full_ok` 样例在上一次改动（新增 `required models/crnn.onnx`
+与 `required ocr_crnn`）后没有同步更新，样例清单里既没有模型条目也没有 `ocr_crnn` 模块，
+自检会由「全部符合预期」退化为「full_ok 与预期不符」。本次一并补齐。
+
+**验证（仅静态，未执行项目代码）**
+
+```
+py_compile  scripts/check_bundle.py            通过
+语法树解析  scripts/build.ps1（pwsh Parser）   通过，无语法错误
+git status  模型文件未进入待提交列表            确认（models/*.onnx 被忽略）
+```
+
+**回滚点**
+
+`git checkout -- .gitignore scripts/build.ps1 scripts/check_bundle.py README.md docs/ocr-interface.md`
+`del models\README.md`
+
+## 2026-10-18 20:03 | 验证码显示改为按上限自适应缩放
+
+**现象**：截图显示验证码图占了大半个窗口（约 800×240）。
+
+**根因**：`CAPTCHA_ZOOM = 4` 是写死的倍数。原来 `/CheckCode` 是 **80×24**，放大 4 倍
+= 320×96 正合适；换成 `/ACaptcha.ashx` 的 **200×60** 后变成 **800×240**，直接撑满。
+
+**改动**
+
+| 文件 | 内容 |
+|---|---|
+| `src/app.py` | 新增 `CAPTCHA_MAX_W=360` / `CAPTCHA_MAX_H=110` 与 `_captcha_scale()`；`_show_captcha` 的 Pillow 分支改用自适应尺寸；tkinter 回退分支改为挑一个不超限的整数倍 |
+| `tests/test_gui.py` | `test_captcha_zoom_is_constant_and_unclamped` 重写为 `test_captcha_scale_respects_zoom_and_caps`，断言小图走满倍数、大图被收上限且保持宽高比 |
+
+**缩放规则**
+
+```
+zoom = min(CAPTCHA_ZOOM, MAX_W/宽, MAX_H/高)，下限 0.3
+
+/CheckCode       80x24  -> 320x96    （4 倍原样，未触发上限）
+/ACaptcha.ashx  200x60  -> 360x108   （4 倍会到 800x240，收到上限）
+超大图           400x120 -> 360x108   （允许缩小，保持比例）
+```
+
+**验证**
+
+```
+GUI/布局测试：18 通过 / 0 失败
+新用例 test_captcha_scale_respects_zoom_and_caps：PASS
+重新构建：192.75 MiB，self-check OK
+构建后 config.json 仍是修正后的版本（captchaUrl=/ACaptcha.ashx、后端=crnn），凭据保留
+```
+
+**回滚点**：`git checkout -- src/app.py tests/test_gui.py` 后重新构建
+
+## 2026-10-18 19:55 | 修正运行期 config.json（改默认值对已存在配置无效）
+
+**现象**：改完默认后端后，实际运行软件登录**仍然用四位字母验证码**，识别结果不对。
+
+**根因**：`DEFAULT_CONFIG` 只在**首次创建**配置时生效。`load_config()` 的 `_merge` 是
+「以默认值为骨架 + 用户值覆盖」，因此：
+
+- 缺失的键（如新增的 `logoffCaptchaUrl`）会被补上 ✓
+- **已存在的键（`captchaUrl`、`ocrBackend`）永远保持旧值** ✗
+
+`build\config.json` 里仍是 `captchaUrl=/CheckCode`、`ocrBackend=ddddocr`，所以 exe 读到的
+就是旧配置，代码里的新默认值根本没参与。
+
+**处理**：就地修正 `build\config.json`（保留 user 凭据），备份为 `config.json.bak`：
+
+| 键 | 旧值 | 新值 |
+|---|---|---|
+| `captchaUrl` | `/CheckCode` | `/ACaptcha.ashx` |
+| `logoffCaptchaUrl` | `/CheckCode` | `/CheckCode`（不变） |
+| `options.ocrBackend` | `ddddocr` | `crnn` |
+| `options.logoffOcrBackend` | `ddddocr` | `ddddocr`（不变） |
+
+**注意**：`config.json` 在 `.gitignore` 内（含明文凭据），**不进版本库**，因此这次修改
+只影响本机；其他机器上的旧配置需要同样手工修正。
+
+**验证（完整链路，一次通过）**
+
+```
+1. 注销  /CheckCode      + ddddocr -> 识别 '3sc8' -> 已断开网络（门户已确认下线）
+2. 登录  /ACaptcha.ashx  + crnn    -> 识别 '5'    -> 联网成功!
+
+另外确认：/ACaptcha.ashx 取 5 张，crnn 全部给出答案（7 / 18 / 3 / 35 / 13）
+         /CheckCode    取 3 张，ddddocr 全部给出识别（98da / 5lu8 / a862）
+```
+
+**无需重新构建**：`config.json` 是 exe 同目录下的外部文件，运行期读取；exe 本身不含配置。
+
+**回滚点**：`copy /y build\config.json.bak build\config.json`
+
+## 2026-10-18 19:40 | 接入自研 CRNN 后端，登录/注销改用双引擎
+
+**背景（实测事实，不是推测）**
+
+目标站点的登录页与注销页用的是**两套完全不同的验证码**：
+
+| 页面 | 端点 | 形态 | 尺寸 |
+|---|---|---|---|
+| `/login` | `/ACaptcha.ashx` | 算术题（如 `98加5`） | 200×60 |
+| `/logoff` | `/CheckCode` | 四位字母数字（如 `EKHW`） | 80×24 |
+
+页面 HTML 可以印证：
+
+```html
+<!-- /login -->
+<img id="MainContent_ImageCC" title="请输入此验证码计算结果" src="/ACaptcha.ashx" />
+<!-- /logoff -->
+<img id="MainContent_ImageCC" title="请输入此验证码" src="/CheckCode" />
+```
+
+原配置只有单一 `captchaUrl`（`/CheckCode`）被两个场景共用，导致登录时取到字母验证码，
+却按算术题提交 —— 这就是 ddddocr 在登录路径"用不上"的根因。
+
+**改动**
+
+| 文件 | 内容 |
+|---|---|
+| `src/ocr_crnn.py` | **新增**。自研 CRNN 后端，实现 `OcrBackend` 契约；识别算式后**内部求值**，对外只返回答案数字，业务代码零改动 |
+| `src/ocr.py` | 默认后端 `ddddocr` → `crnn`；`_LOADERS` 双登记；新增 `logoff_backend_name_of()` / `create_logoff_engine()` |
+| `src/app.py` | `build_ocr_engine(cfg, logoff=False)` 按场景装配；`__init__` 增加 `self.ocr_logoff`；注销流程改用 `self.ocr_logoff` |
+| `src/config_store.py` | 新增 `logoffCaptchaUrl`；`captchaUrl` 改为 `/ACaptcha.ashx`；新增 `options.logoffOcrBackend` |
+| `src/portal_client.py` | `prepare_logoff()` 改用 `logoffCaptchaUrl`（缺省回退 `captchaUrl` 保持兼容） |
+| `models/crnn.onnx` | **新增**。13.47 MB，验证集准确率 91.4% |
+| `config.sample.json` | 同步双 URL + 双后端，并注明两者不可混用 |
+| `scripts/build.ps1` | 增加 `--hidden-import ocr_crnn` 与 `--add-data models;models` |
+| `scripts/check_bundle.py` | 增加 `ocr_crnn` 模块与 `models/crnn.onnx` 的 required 断言 |
+| `tests/support.py` | mock 环境补 `logoffCaptchaUrl`（原先会去真实站点取码） |
+| `tests/test_ocr_decoupling.py` | 默认后端断言 `ddddocr` → `crnn` |
+| `tests/test_backend.py` | 默认后端断言同步；`prepare_logoff` 的 mock 同时匹配两个端点 |
+
+**模型来源**
+
+- 训练资料：作者本机训练工作区（模型、4132 条标注、4031 张金标准图、训练脚本），**不随仓库分发**
+- 训练方式：自举采集 —— 服务端只验答案不验算式，拿它当免费标注器；**必须过滤答案不唯一的样本**（答案=0/1、乘1/除1、`a-0`），实测 457 条里 29.3% 属于此类，否则标签被污染
+- 准确率：验证集 91.4%（566/619）；端到端真实提交 64% 首轮通过，配合重试单次登录约 3 秒
+
+**验证结果**
+
+```
+单元测试：83 通过 / 1 失败
+  唯一失败 test_perf.test_ui_ready_time 在单独运行下通过（0.115s，容差 0.168s），
+  全量跑时受前序测试进程干扰升到 0.6s —— 既有测试隔离问题，非本次改动引入。
+
+实际识别：
+  crnn  /ACaptcha.ashx -> '7' '4' '21' '-26' '35'（已求值）
+  ddddocr /CheckCode   -> 'y52e' 'edbd' 'crga'
+  import ocr 耗时 0.0009s，对启动无影响。
+```
+
+**回滚点**
+
+`git checkout -- src/ocr.py src/app.py src/config_store.py src/portal_client.py`
+`del src\ocr_crnn.py models\crnn.onnx`
+`git checkout -- scripts/build.ps1 scripts/check_bundle.py config.sample.json tests/`
+
 ## 2026-10-13 Python lite 体积优化方案补充
 
 - 改动：新增 `docs/20261013-lite-python-optimization-plan.md`，规划不更换 Python + tkinter + PyInstaller 的 lite 优化；分 L0 基线、L1 去 Pillow/pystray、L2 精简隐式内容、L3 风险选项。

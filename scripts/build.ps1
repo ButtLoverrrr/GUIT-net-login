@@ -119,11 +119,37 @@ if (-not (Test-Path $Cv2Hook)) {
     throw "缺少 cv2 打包 hook：$Cv2Hook"
 }
 
+# 自研 CRNN 模型（登录页算术验证码）是作者私有资产，**不入开源仓库**（见 models\README.md）。
+# 因此这里按存在与否决定是否收集，缺模型不能让构建失败：
+#   - 本地有 models\crnn.onnx -> 收进包，check_bundle.py 对它的断言是 required；
+#   - CI / 克隆环境没有        -> 跳过 --add-data，check_bundle.py 把断言降为 notice。
+# PyInstaller 对不存在的 --add-data 源目录会直接报错退出，所以必须先判存在再拼参数。
+$CrnnModel = Join-Path $ProjectRoot 'models\crnn.onnx'
+$ModelArgs = @()
+if (Test-Path $CrnnModel) {
+    Write-Host ("  收集自研 CRNN 模型：{0}（{1:N2} MiB）" -f $CrnnModel, ((Get-Item $CrnnModel).Length / 1MB))
+    $ModelArgs = @('--add-data', ((Join-Path $ProjectRoot 'models') + ';models'))
+}
+else {
+    Write-Host '  未发现 models\crnn.onnx：本次构建不含自研 CRNN 模型，登录验证码将退回手动输入' -ForegroundColor Yellow
+}
+
 # 注意：不要用 $args（PowerShell 自动变量），故命名为 $pyiArgs
 $pyiArgs = @(
     '--noconfirm', '--clean',
     '--onefile', '--noconsole',
     '--name', $BaseName,
+    # 显式排除训练期残留的深度学习框架。本项目只用 onnxruntime 做推理，
+    # 不依赖 torch；但构建用的 venv 里装过 torch（曾用于训练验证码模型），
+    # PyInstaller 的 torch hook 会把它整套打包进来 —— 实测占解压后 365 MiB
+    # （68%），压缩后约 110 MiB，是 exe 体积的绝对大头。
+    # torch 的依赖链（filelock/fsspec/jinja2/markupsafe/networkx/sympy/mpmath）
+    # 随之不被引用，一并排除。
+    '--exclude-module', 'torch',
+    '--exclude-module', 'torchvision',
+    '--exclude-module', 'torchaudio',
+    '--exclude-module', 'onnxscript',
+    '--exclude-module', 'onnxruntime.tools',
     # 应用图标：--icon 用于 exe 文件图标；--add-data 让程序运行时能读到图标
     '--icon', (Join-Path $ProjectRoot 'assets\app.ico'),
     '--add-data', ((Join-Path $ProjectRoot 'assets') + ';assets'),
@@ -132,14 +158,19 @@ $pyiArgs = @(
     # pystray 的平台后端与 Pillow 的 tkinter 桥接是动态/隐式导入，显式声明避免漏收
     '--hidden-import', 'pystray._win32',
     '--hidden-import', 'PIL.ImageTk',
-    # OCR 接口层：app 只依赖 src\ocr.py 的契约，具体实现（ocr_helper）由注册表惰性导入，
+    # OCR 接口层：app 只依赖 src\ocr.py 的契约，具体实现由注册表惰性导入，
     # 静态分析看不到 → 必须显式声明，否则打包后 OCR 静默消失（只剩手输）。
+    # 两套后端都要收：登录页是算术题（ocr_crnn），注销页是四位字母（ocr_helper）。
     # check_bundle.py 有对应断言，漏收会在构建阶段直接失败。
     '--hidden-import', 'ocr',
+    '--hidden-import', 'ocr_crnn',
     '--hidden-import', 'ocr_helper',
     '--hidden-import', 'ddddocr',
     '--copy-metadata', 'ddddocr',
     '--add-data', ($DdddOcrModel + ';ddddocr'),
+    # 自研 CRNN 模型：登录页算术验证码用，运行时按 models/crnn.onnx 查找。
+    # $ModelArgs 在模型不存在时是空数组（PowerShell 会自动摊平，不会留下悬空参数）。
+    $ModelArgs
     '--collect-all', 'onnxruntime',
     '--additional-hooks-dir', $HooksDir,
     # 产物与中间件都放 _work：build\ 根目录只留最终 exe 与配置样例

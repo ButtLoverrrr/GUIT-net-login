@@ -416,19 +416,36 @@ def test_log_is_bounded_and_keeps_bottom():
         root.destroy()
 
 
-def test_captcha_zoom_is_constant_and_unclamped():
-    """验证码放大倍数不随环境漂移（缩小验证码属于布局语义变更，已确认不必要）。"""
+def test_captcha_scale_respects_zoom_and_caps():
+    """验证码显示尺寸：小图按倍数放大，大图被收到上限以内。
+
+    站点的两个验证码端点原图差很多（实测）：
+      /CheckCode       80x24   -> 按 CAPTCHA_ZOOM 放大
+      /ACaptcha.ashx  200x60   -> 固定倍数会到 800x240 撑满窗口，必须收上限
+    """
     sb, cs, portal, cfg, appmod, root, ui, original, config_store = _boot()
     try:
         import io
         import PIL.Image
-        buf = io.BytesIO()
-        PIL.Image.new('RGB', (80, 24), (255, 255, 255)).save(buf, 'PNG')
-        ui._show_captcha(buf.getvalue())
-        root.update_idletasks()
-        root.update()
-        assert ui.photo.width() == 80 * appmod.CAPTCHA_ZOOM, ui.photo.width()
-        assert ui.photo.height() == 24 * appmod.CAPTCHA_ZOOM, ui.photo.height()
+
+        def render(size):
+            buf = io.BytesIO()
+            PIL.Image.new('RGB', size, (255, 255, 255)).save(buf, 'PNG')
+            ui._show_captcha(buf.getvalue())
+            root.update_idletasks()
+            root.update()
+            return ui.photo.width(), ui.photo.height()
+
+        # 小图：不被上限影响，走满倍数
+        w, h = render((80, 24))
+        assert (w, h) == (80 * appmod.CAPTCHA_ZOOM,
+                          24 * appmod.CAPTCHA_ZOOM), (w, h)
+
+        # 大图：必须在上限内，且保持宽高比
+        w, h = render((200, 60))
+        assert w <= appmod.CAPTCHA_MAX_W, w
+        assert h <= appmod.CAPTCHA_MAX_H, h
+        assert abs(w / float(h) - 200.0 / 60.0) < 0.1, (w, h)
     finally:
         config_store.load_config = original
         portal.stop()
