@@ -2,6 +2,72 @@
 
 格式：`YYYY-MM-DD HH:mm | 操作 | 影响文件 | 验证结果 | 回滚点`
 
+## 2026-10-18 20:30 | exe 体积 192.75 → 67.21 MiB（排除误收的 torch）
+
+**现象**：exe 达 192.75 MiB，与项目实际依赖不相称。
+
+**根因**：解析 PKG 后按解压体积统计，**torch 占 365.25 MiB（68.3%）**：
+
+```
+torch            365.25 MiB   68.3%
+onnxruntime       41.53 MiB    7.8%
+PYZ（标准库）      37.21 MiB    7.0%
+numpy.libs        20.18 MiB    3.8%
+models/crnn.onnx  13.47 MiB    2.5%   <- 自研模型，只占 2.5%
+```
+
+项目只用 `onnxruntime` 推理，**完全不依赖 torch**（全仓仅 `tests/test_perf.py` 与
+`tools/perf_ab.py` 把它列进「启动时不应加载的重型依赖」黑名单）。torch 来自构建所用
+venv 的前史（曾在该 venv 内做验证码模型训练验证），PyInstaller 的 torch hook 把它整套
+收进了包。
+
+**改动**：`scripts/build.ps1` 的 `$pyiArgs` 增加排除项：
+
+```powershell
+'--exclude-module', 'torch',
+'--exclude-module', 'torchvision',
+'--exclude-module', 'torchaudio',
+'--exclude-module', 'onnxscript',
+'--exclude-module', 'onnxruntime.tools',
+```
+
+torch 的依赖链（filelock / fsspec / jinja2 / markupsafe / networkx / sympy / mpmath）
+随之不再被引用。
+
+**结果**
+
+```
+exe      192.75 MiB -> 67.21 MiB   (-65%)
+PKG 条目  3915      -> 1405
+PYZ 模块  4856      -> 1655
+self-check OK（回读 1405 条目，引导器 403968 字节）
+包内 models\crnn.onnx 13.47 MiB 与 ddddocr\common_old.onnx 12.98 MiB 均完好
+```
+
+**模型量化评估（结论：不采用）**
+
+用全量 3764 张金标准图对拍：
+
+| 方案 | 体积 | 准确率 | 速度 | 结论 |
+|---|---|---|---|---|
+| FP32 原版 | 13.47 MiB | 0.9787 | 117.9 张/秒 | 保留 |
+| INT8 动态 | 3.41 MiB | 0.9787 | **12.4 张/秒** | 慢 9.5 倍，不采用 |
+| FP16 | 6.74 MiB | — | — | ONNX Runtime CPU 跑 FP16 LSTM 进程级崩溃 |
+
+INT8 精度不变（3764 张里仅 3 张输出不同，其中 2 张反而更准），但 ONNX Runtime 在 CPU 上
+对 LSTM 做动态量化后，反量化开销压过省下的计算，单张 8.5ms → 81ms。模型只占 exe 的
+2.5%，压到 1/4 仅省约 10 MiB，不值得牺牲 9.5 倍吞吐。
+
+**未做的优化（评估后放弃）**
+
+- `numpy.libs` 的 OpenBLAS（20 MiB）：矩阵规模很小，但排除有崩溃风险，收益不抵风险；
+- `onnxruntime`（41.53 MiB）：推理必需，无法削减。
+
+**验证**：构建脚本完整跑通，`check_bundle.py` 清单校验通过，self-check OK。
+**未做**：exe 的 GUI 实机启动验证（需用户在本机运行）。
+
+**回滚点**：删除 `scripts/build.ps1` 里上述五条 `--exclude-module`，重新构建（体积会回到 192 MiB 级别）。
+
 ## 2026-10-18 20:20 | 开源化：自研模型移出版本库，构建与清单校验改为「模型可选」
 
 **背景**：仓库是公开的（MIT），但 `models/crnn.onnx` 是作者自行训练的私有资产，不打算开源。
