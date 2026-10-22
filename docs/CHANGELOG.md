@@ -24,7 +24,23 @@ py_compile src\app.py          通过
 git tag 列表                   最新 v1.0.20 -> major 递增将得到 v2.0.0
 ```
 
-**回滚点**：`APP_VERSION` 改回 `1.0.0`（对已发布标签无影响）。
+**发布结果（2026-10-22 13:48）**
+
+```text
+触发方式    workflow_dispatch（inputs.bump=major），run 已 success
+tag         v2.0.0
+Release     GUIT-net-login v2.0.0（published 2026-10-22T05:48:11Z）
+产物        GUIT-net-login.exe  47,543,777 字节（45.34 MiB）
+```
+
+- push 提交带 `[skip ci]`，确认**没有**产生多余的 v1.0.21。
+- 本机没有 gh CLI、也没有 GITHUB_TOKEN 环境变量，dispatch 是借 Windows 凭据管理器里
+  已存的 git 凭据调 Actions API 完成的（token 未落盘、未打印）。
+- 公开产物**不含自研模型**（`models/*.onnx` 在 `.gitignore`），登录算术验证码需手输；
+  带 v7 模型的版本只有本机构建产出。
+
+**回滚点**：`APP_VERSION` 改回 `1.0.0`（对已发布标签无影响）；撤销 Release 用
+`gh release delete v2.0.0 --delete-tag`。
 
 ## 2026-10-21 16:06 | 线上 OCR 模型 v3 → v7（真实流量 +19.3 pt）
 
