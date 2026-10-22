@@ -79,7 +79,7 @@ from config_store import (app_dir, has_credential, load_config, remove_config, s
 from ocr import (OcrBackend, create_engine, create_logoff_engine,
                  safe_available, safe_classify)
 from portal_client import (KIND_CAPTCHA, KIND_NEED_MANUAL, LoginSession, PortalError, auto_login)
-APP_VERSION = '1.0.0'
+APP_VERSION = '2.0.0'
 
 
 def build_ocr_engine(cfg: dict, length: int = 4, logoff: bool = False) -> OcrBackend:
